@@ -53,14 +53,21 @@ func testEngineQueue() {
 	defer q.Stop()
 
 	testData := []string{
-		`{"name": "user1", "action": "login", "timestamp": "2024-01-01T10:00:00Z"}`,
-		`{"name": "user2", "action": "logout", "timestamp": "2024-01-01T10:05:00Z"}`,
-		`{"name": "user3", "action": "login", "timestamp": "2024-01-01T10:10:00Z"}`,
-		`{"name": "user4", "action": "invalid json", "timestamp": "2024-01-01T10:15:00Z"`,
-		`{"name": "user5", "action": "purchase", "timestamp": "2024-01-01T10:20:00Z", "amount": 99.99}`,
+		// Valid enveloped events (payload is JSON string)
+		`{"topic":"auth","payload":"{\"name\":\"user1\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:00:00Z\"}"}`,
+		`{"topic":"auth","payload":"{\"name\":\"user2\",\"action\":\"logout\",\"timestamp\":\"2024-01-01T10:05:00Z\"}"}`,
+		`{"topic":"auth","payload":"{\"name\":\"user3\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:10:00Z\"}"}`,
+		// Invalid envelope: payload is not JSON
+		`{"topic":"auth","payload":"not json at all"}`,
+		// Invalid envelope: payload is malformed JSON string
+		`{"topic":"auth","payload":"{\"name\":\"broken\",\"action\":\"oops\""}`,
+		// Invalid envelope: missing topic
+		`{"payload":"{\"name\":\"user5\",\"action\":\"purchase\",\"timestamp\":\"2024-01-01T10:20:00Z\",\"amount\":99.99}"}`,
+		// Completely non-conforming (raw JSON, not enveloped)
+		`{"name":"raw_no_envelope"}`,
+		// Empty and whitespace
 		``,
 		`   `,
-		`not json at all`,
 	}
 
 	fmt.Println("Enqueuing test data...")

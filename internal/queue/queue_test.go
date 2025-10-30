@@ -1,10 +1,11 @@
 package queue
 
 import (
-	"os"
-	"strings"
-	"testing"
-	"time"
+    "fmt"
+    "os"
+    "strings"
+    "testing"
+    "time"
 )
 
 func TestMain(m *testing.M) {
@@ -24,6 +25,10 @@ func TestMain(m *testing.M) {
 func pathExists(p string) bool {
     _, err := os.Stat(p)
     return err == nil
+}
+
+func ev(topic, payload string) string {
+    return fmt.Sprintf(`{"topic":"%s","payload":%q}`, topic, payload)
 }
 
 func TestEngineQueue_WritesTimestampedAndLatestFiles(t *testing.T) {
@@ -223,12 +228,12 @@ func TestQueue_ProcessItems(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	err = q.Enqueue(`{"name": "test1"}`)
+    err = q.Enqueue(ev("t", `{"name": "test1"}`))
 	if err != nil {
 		t.Fatalf("Failed to enqueue: %v", err)
 	}
 
-	err = q.Enqueue(`{"name": "test2"}`)
+    err = q.Enqueue(ev("t", `{"name": "test2"}`))
 	if err != nil {
 		t.Fatalf("Failed to enqueue: %v", err)
 	}
@@ -249,12 +254,12 @@ func TestQueue_ProcessItems(t *testing.T) {
 	}
 
 	output := string(content)
-	if !strings.Contains(output, `{"name": "test1"} (processed)`) {
-		t.Error("Expected '{\"name\": \"test1\"} (processed)' in output file")
+    if !strings.Contains(output, ev("t", `{"name": "test1"}`)+" (processed)") {
+        t.Error("Expected enveloped test1 event (processed) in output file")
 	}
 
-	if !strings.Contains(output, `{"name": "test2"} (processed)`) {
-		t.Error("Expected '{\"name\": \"test2\"} (processed)' in output file")
+    if !strings.Contains(output, ev("t", `{"name": "test2"}`)+" (processed)") {
+        t.Error("Expected enveloped test2 event (processed) in output file")
 	}
 }
 
@@ -262,10 +267,7 @@ func TestQueue_ReadFromFile(t *testing.T) {
 	testFile := "test_input_file.log"
 	defer os.Remove(testFile)
 
-	content := `{"name": "line1"}
-{"name": "line2"}
-{"name": "line3"}
-`
+    content := ev("t", `{"name":"line1"}`) + "\n" + ev("t", `{"name":"line2"}`) + "\n" + ev("t", `{"name":"line3"}`) + "\n"
 	err := os.WriteFile(testFile, []byte(content), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -303,7 +305,7 @@ func TestQueue_ReadFromFile(t *testing.T) {
 	}
 
 	output := string(outputContent)
-	expectedLines := []string{`{"name": "line1"} (processed)`, `{"name": "line2"} (processed)`, `{"name": "line3"} (processed)`}
+    expectedLines := []string{ev("t", `{"name":"line1"}`) + " (processed)", ev("t", `{"name":"line2"}`) + " (processed)", ev("t", `{"name":"line3"}`) + " (processed)"}
 
 	for _, expected := range expectedLines {
 		if !strings.Contains(output, expected) {
@@ -416,15 +418,16 @@ func TestQueue_ConcurrentEnqueue(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	for i := 0; i < 10; i++ {
-		go func(i int) {
-			jsonStr := `{"id": ` + string(rune('0' + i)) + `, "name": "test"}`
-			err := q.Enqueue(jsonStr)
-			if err != nil {
-				t.Errorf("Failed to enqueue: %v", err)
-			}
-		}(i)
-	}
+    for i := 0; i < 10; i++ {
+        go func(i int) {
+            payload := fmt.Sprintf(`{"id": %d, "name": "test"}`, i)
+            jsonStr := ev("t", payload)
+            err := q.Enqueue(jsonStr)
+            if err != nil {
+                t.Errorf("Failed to enqueue: %v", err)
+            }
+        }(i)
+    }
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -486,14 +489,7 @@ func TestQueue_FileWithEmptyLines(t *testing.T) {
 	testFile := "test_empty_lines.log"
 	defer os.Remove(testFile)
 
-	content := `{"name": "line1"}
-
-{"name": "line2"}
-
-
-
-{"name": "line3"}
-`
+    content := ev("t", `{"name":"line1"}`) + "\n\n" + ev("t", `{"name":"line2"}`) + "\n\n\n\n" + ev("t", `{"name":"line3"}`) + "\n"
 	err := os.WriteFile(testFile, []byte(content), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -523,7 +519,7 @@ func TestQueue_FileWithEmptyLines(t *testing.T) {
 	}
 
 	output := string(outputContent)
-	expectedLines := []string{`{"name": "line1"} (processed)`, `{"name": "line2"} (processed)`, `{"name": "line3"} (processed)`}
+    expectedLines := []string{ev("t", `{"name":"line1"}`) + " (processed)", ev("t", `{"name":"line2"}`) + " (processed)", ev("t", `{"name":"line3"}`) + " (processed)"}
 
 	for _, expected := range expectedLines {
 		if !strings.Contains(output, expected) {
@@ -549,8 +545,8 @@ func TestQueue_JSONValidation_ValidJSON(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	validJSON := `{"name": "test", "value": 123}`
-	err = q.Enqueue(validJSON)
+    validJSON := ev("t", `{"name": "test", "value": 123}`)
+    err = q.Enqueue(validJSON)
 	if err != nil {
 		t.Fatalf("Failed to enqueue valid JSON: %v", err)
 	}
@@ -581,8 +577,8 @@ func TestQueue_JSONValidation_InvalidJSON(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	invalidJSON := `{"name": "test", "value": 123` // missing closing brace
-	err = q.Enqueue(invalidJSON)
+    invalidJSON := ev("t", `{"name": "test", "value": 123`) // missing closing brace
+    err = q.Enqueue(invalidJSON)
 	if err != nil {
 		t.Fatalf("Failed to enqueue invalid JSON: %v", err)
 	}
@@ -613,8 +609,8 @@ func TestQueue_JSONValidation_MixedValidInvalid(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	validJSON := `{"name": "test", "value": 123}`
-	invalidJSON := `{"name": "test", "value": 123`
+    validJSON := ev("t", `{"name": "test", "value": 123}`)
+    invalidJSON := ev("t", `{"name": "test", "value": 123`)
 
 	err = q.Enqueue(validJSON)
 	if err != nil {
@@ -651,9 +647,7 @@ func TestQueue_JSONValidation_FromFile(t *testing.T) {
 	testFile := "test_json_file.log"
 	defer os.Remove(testFile)
 
-	content := `{"name": "test1", "value": 123}
-{"name": "test2", "value": 456
-{"name": "test3", "value": 789}`
+    content := ev("t", `{"name": "test1", "value": 123}`) + "\n" + ev("t", `{"name": "test2", "value": 456`) + "\n" + ev("t", `{"name": "test3", "value": 789}`)
 	
 	err := os.WriteFile(testFile, []byte(content), 0644)
 	if err != nil {
@@ -685,11 +679,11 @@ func TestQueue_JSONValidation_FromFile(t *testing.T) {
 
 	output := string(outputContent)
 	
-	expectedLines := []string{
-		`{"name": "test1", "value": 123} (processed)`,
-		`{"name": "test2", "value": 456 (rejected - invalid JSON)`,
-		`{"name": "test3", "value": 789} (processed)`,
-	}
+    expectedLines := []string{
+        ev("t", `{"name": "test1", "value": 123}`) + " (processed)",
+        ev("t", `{"name": "test2", "value": 456`) + " (rejected - invalid JSON)",
+        ev("t", `{"name": "test3", "value": 789}`) + " (processed)",
+    }
 
 	for _, expected := range expectedLines {
 		if !strings.Contains(output, expected) {
@@ -740,8 +734,8 @@ func TestQueue_JSONValidation_NonJSONString(t *testing.T) {
 		t.Fatalf("Failed to set output log file: %v", err)
 	}
 
-	nonJSON := "this is not json at all"
-	err = q.Enqueue(nonJSON)
+    nonJSON := ev("t", "this is not json at all")
+    err = q.Enqueue(nonJSON)
 	if err != nil {
 		t.Fatalf("Failed to enqueue non-JSON string: %v", err)
 	}
@@ -799,11 +793,7 @@ func TestQueue_EmptyEvents_FromFile(t *testing.T) {
 	testFile := "test_empty_events_file.log"
 	defer os.Remove(testFile)
 
-	content := `{"name": "valid1"}
-
-{"name": "valid2"}
-
-   `
+    content := ev("t", `{"name":"valid1"}`) + "\n\n" + ev("t", `{"name":"valid2"}`) + "\n\n   "
 
 	err := os.WriteFile(testFile, []byte(content), 0644)
 	if err != nil {
@@ -835,10 +825,10 @@ func TestQueue_EmptyEvents_FromFile(t *testing.T) {
 
 	output := string(outputContent)
 	
-	expectedLines := []string{
-		`{"name": "valid1"} (processed)`,
-		`{"name": "valid2"} (processed)`,
-	}
+    expectedLines := []string{
+        ev("t", `{"name":"valid1"}`) + " (processed)",
+        ev("t", `{"name":"valid2"}`) + " (processed)",
+    }
 
 	for _, expected := range expectedLines {
 		if !strings.Contains(output, expected) {

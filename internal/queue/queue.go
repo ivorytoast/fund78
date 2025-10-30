@@ -138,7 +138,7 @@ func (q *Queue) process() {
 				continue
 			}
 
-			if q.isValidJSON(item) {
+			if q.isValidEvent(item) {
 				processedItem := item + " (processed)"
 				q.logToOutputFile(processedItem)
 				select {
@@ -177,6 +177,29 @@ func (q *Queue) logToOutputFile(item string) {
 func (q *Queue) isValidJSON(s string) bool {
 	var js json.RawMessage
 	return json.Unmarshal([]byte(s), &js) == nil
+}
+
+type eventEnvelope struct {
+	Topic   string `json:"topic"`
+	Payload string `json:"payload"`
+}
+
+func (q *Queue) isValidEvent(s string) bool {
+	var env eventEnvelope
+	if err := json.Unmarshal([]byte(s), &env); err != nil {
+		return false
+	}
+	if strings.TrimSpace(env.Topic) == "" {
+		return false
+	}
+	if strings.TrimSpace(env.Payload) == "" {
+		return false
+	}
+	var payloadRaw json.RawMessage
+	if err := json.Unmarshal([]byte(env.Payload), &payloadRaw); err != nil {
+		return false
+	}
+	return true
 }
 
 func (q *Queue) Enqueue(item string) error {
