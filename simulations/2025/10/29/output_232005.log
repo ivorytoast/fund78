@@ -1,0 +1,6 @@
+{"name": "user1", "action": "login", "timestamp": "2024-01-01T10:00:00Z"} (processed)
+{"name": "user2", "action": "logout", "timestamp": "2024-01-01T10:05:00Z"} (processed)
+{"name": "user3", "action": "login", "timestamp": "2024-01-01T10:10:00Z"} (processed)
+{"name": "user4", "action": "invalid json", "timestamp": "2024-01-01T10:15:00Z" (rejected - invalid JSON)
+{"name": "user5", "action": "purchase", "timestamp": "2024-01-01T10:20:00Z", "amount": 99.99} (processed)
+not json at all (rejected - invalid JSON)
