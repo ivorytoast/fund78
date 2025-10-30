@@ -1,8 +1,0 @@
-test1 (rejected - invalid JSON)
-test2 (rejected - invalid JSON)
-{"name": "valid1"} (processed)
-{"name": "valid2"} (processed)
-test1 (rejected - invalid JSON)
-test2 (rejected - invalid JSON)
-{"name": "valid1"} (processed)
-{"name": "valid2"} (processed)

@@ -15,8 +15,108 @@ func TestMain(m *testing.M) {
     os.Setenv("SIMULATIONS_DIR", dir)
     code := m.Run()
     os.Unsetenv("SIMULATIONS_DIR")
+    // Also remove any local debug/ created by older behavior
+    _ = os.RemoveAll("debug")
     os.RemoveAll(dir)
     os.Exit(code)
+}
+
+func pathExists(p string) bool {
+    _, err := os.Stat(p)
+    return err == nil
+}
+
+func TestEngineQueue_WritesTimestampedAndLatestFiles(t *testing.T) {
+    q := NewEngineQueue()
+    defer q.Stop()
+
+    err := q.Enqueue(`{"k":"v"}`)
+    if err != nil {
+        t.Fatalf("enqueue: %v", err)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    base := os.Getenv("SIMULATIONS_DIR")
+    now := time.Now()
+    y, m, d := now.Format("2006"), now.Format("01"), now.Format("02")
+    dayDir := base + "/" + y + "/" + m + "/" + d
+
+    // Latest real files should exist and not be symlinks
+    latestIn := dayDir + "/input.log"
+    latestOut := dayDir + "/output.log"
+    if !pathExists(latestIn) || !pathExists(latestOut) {
+        t.Fatalf("latest files not found: %s or %s", latestIn, latestOut)
+    }
+    if fi, err := os.Lstat(latestIn); err != nil {
+        t.Fatalf("lstat latest input: %v", err)
+    } else if (fi.Mode() & os.ModeSymlink) != 0 {
+        t.Fatalf("latest input is symlink, expected regular file")
+    }
+    if fo, err := os.Lstat(latestOut); err != nil {
+        t.Fatalf("lstat latest output: %v", err)
+    } else if (fo.Mode() & os.ModeSymlink) != 0 {
+        t.Fatalf("latest output is symlink, expected regular file")
+    }
+
+    // Timestamped files should also exist
+    // Find any input_*.log created now
+    entries, err := os.ReadDir(dayDir)
+    if err != nil {
+        t.Fatalf("readdir dayDir: %v", err)
+    }
+    foundTS := false
+    for _, e := range entries {
+        if strings.HasPrefix(e.Name(), "input_") && strings.HasSuffix(e.Name(), ".log") {
+            foundTS = true
+            break
+        }
+    }
+    if !foundTS {
+        t.Fatalf("no timestamped input_*.log found in %s", dayDir)
+    }
+}
+
+func TestReplay_CreatesDebugWithMatchingTimestamp(t *testing.T) {
+    base := os.Getenv("SIMULATIONS_DIR")
+    now := time.Now()
+    y, m, d := now.Format("2006"), now.Format("01"), now.Format("02")
+    dayDir := base + "/" + y + "/" + m + "/" + d
+    os.MkdirAll(dayDir, 0755)
+
+    // Create two timestamped input files, the later should be selected for input.log derivation
+    ts1 := "000000"
+    ts2 := "235959"
+    f1 := dayDir + "/input_" + ts1 + ".log"
+    f2 := dayDir + "/input_" + ts2 + ".log"
+    os.WriteFile(f1, []byte(`{"a":1}\n`), 0644)
+    os.WriteFile(f2, []byte(`{"b":2}\n`), 0644)
+
+    // Create latest as real file mirroring f2
+    latest := dayDir + "/input.log"
+    os.WriteFile(latest, []byte(`{"b":2}\n`), 0644)
+
+    q := NewReplayQueue()
+    defer q.Stop()
+
+    // Start from latest input.log (no symlink), debug ts should match ts2
+    if err := q.StartReadingLogFile(latest); err != nil {
+        t.Fatalf("start reading: %v", err)
+    }
+
+    // Allow processing
+    select {
+    case <-q.GetQuit():
+    case <-time.After(500 * time.Millisecond):
+        t.Fatalf("timeout waiting for quit")
+    }
+
+    debugDir := dayDir + "/debug"
+    expIn := debugDir + "/input_debug_" + ts2 + ".log"
+    expOut := debugDir + "/output_debug_" + ts2 + ".log"
+    if !pathExists(expIn) || !pathExists(expOut) {
+        t.Fatalf("expected debug files %s and %s", expIn, expOut)
+    }
 }
 
 func TestNewEngineQueue(t *testing.T) {

@@ -195,46 +195,58 @@ func (q *Queue) StartReadingLogFile(filePath string) error {
 		return errors.New("StartReadingLogFile cannot be called in Engine mode")
 	}
 
-    resolved := filePath
-    if fi, err := os.Lstat(filePath); err == nil && (fi.Mode()&os.ModeSymlink) != 0 {
-        if p, e := filepath.EvalSymlinks(filePath); e == nil {
-            resolved = p
-        }
-    }
+	resolved := filePath
+	if fi, err := os.Lstat(filePath); err == nil && (fi.Mode()&os.ModeSymlink) != 0 {
+		if p, e := filepath.EvalSymlinks(filePath); e == nil {
+			resolved = p
+		}
+	}
 
-    simDir := filepath.Dir(resolved)
-    base := filepath.Base(resolved)
-    ts := ""
-    if strings.HasPrefix(base, "input_") && strings.HasSuffix(base, ".log") {
-        ts = strings.TrimSuffix(strings.TrimPrefix(base, "input_"), ".log")
-    } else if base == "input.log" {
-        // Derive timestamp from the latest input_*.log in the same directory
-        entries, err := os.ReadDir(simDir)
-        if err == nil {
-            latest := ""
-            for _, e := range entries {
-                name := e.Name()
-                if strings.HasPrefix(name, "input_") && strings.HasSuffix(name, ".log") {
-                    if name > latest { // lexicographic compare works for HHMMSS
-                        latest = name
-                    }
-                }
-            }
-            if latest != "" {
-                ts = strings.TrimSuffix(strings.TrimPrefix(latest, "input_"), ".log")
-            }
-        }
-        if ts == "" {
-            ts = time.Now().Format("150405")
-        }
-    } else {
-        ts = time.Now().Format("150405")
-    }
+	simDir := filepath.Dir(resolved)
+	base := filepath.Base(resolved)
+	ts := ""
+	if strings.HasPrefix(base, "input_") && strings.HasSuffix(base, ".log") {
+		ts = strings.TrimSuffix(strings.TrimPrefix(base, "input_"), ".log")
+	} else if base == "input.log" {
+		// Derive timestamp from the latest input_*.log in the same directory
+		entries, err := os.ReadDir(simDir)
+		if err == nil {
+			latest := ""
+			for _, e := range entries {
+				name := e.Name()
+				if strings.HasPrefix(name, "input_") && strings.HasSuffix(name, ".log") {
+					if name > latest { // lexicographic compare works for HHMMSS
+						latest = name
+					}
+				}
+			}
+			if latest != "" {
+				ts = strings.TrimSuffix(strings.TrimPrefix(latest, "input_"), ".log")
+			}
+		}
+		if ts == "" {
+			ts = time.Now().Format("150405")
+		}
+	} else {
+		ts = time.Now().Format("150405")
+	}
 
-	debugDir := filepath.Join(simDir, "debug")
-	os.MkdirAll(debugDir, 0755)
-	q.SetInputLogFile(filepath.Join(debugDir, "input_debug_"+ts+".log"))
-	q.SetOutputLogFile(filepath.Join(debugDir, "output_debug_"+ts+".log"))
+	// Always write debug logs under simulations/YYYY/MM/DD/debug (not next to arbitrary input files)
+	baseRoot := os.Getenv("SIMULATIONS_DIR")
+	if baseRoot == "" {
+		baseRoot = "simulations"
+	}
+	now := time.Now()
+	year := now.Format("2006")
+	month := now.Format("01")
+	day := now.Format("02")
+	debugDir := filepath.Join(baseRoot, year, month, day, "debug")
+	// Only set debug files if caller hasn't overridden input/output logs
+	if q.inputFile == nil && q.outputFile == nil {
+		os.MkdirAll(debugDir, 0755)
+		q.SetInputLogFile(filepath.Join(debugDir, "input_debug_"+ts+".log"))
+		q.SetOutputLogFile(filepath.Join(debugDir, "output_debug_"+ts+".log"))
+	}
 
 	file, err := os.Open(resolved)
 	if err != nil {
