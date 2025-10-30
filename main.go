@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,24 +51,18 @@ func testReplayQueue() {
 func testEngineQueue() {
 	fmt.Println("Testing EngineQueue - programmatic enqueue")
 	q := queue.NewEngineQueue()
+	q.RegisterApplications(appOne{}, appTwo{}, appThree{})
 	defer q.Stop()
 
 	testData := []string{
-		// Valid enveloped events (payload is JSON string)
-		`{"topic":"auth","payload":"{\"name\":\"user1\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:00:00Z\"}"}`,
-		`{"topic":"auth","payload":"{\"name\":\"user2\",\"action\":\"logout\",\"timestamp\":\"2024-01-01T10:05:00Z\"}"}`,
-		`{"topic":"auth","payload":"{\"name\":\"user3\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:10:00Z\"}"}`,
-		// Invalid envelope: payload is not JSON
-		`{"topic":"auth","payload":"not json at all"}`,
-		// Invalid envelope: payload is malformed JSON string
-		`{"topic":"auth","payload":"{\"name\":\"broken\",\"action\":\"oops\""}`,
-		// Invalid envelope: missing topic
+		`{"topic":"topic-1","payload":"{\"name\":\"user1\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:00:00Z\"}"}`,
+		`{"topic":"topic-2","payload":"{\"name\":\"user2\",\"action\":\"logout\",\"timestamp\":\"2024-01-01T10:05:00Z\"}"}`,
+		`{"topic":"topic-3","payload":"{\"name\":\"user3\",\"action\":\"login\",\"timestamp\":\"2024-01-01T10:10:00Z\"}"}`,
+		`{"topic":"other","payload":"{\"note\":\"no handler\"}"}`,
+		`{"topic":"topic-1","payload":"not json at all"}`,
+		`{"topic":"topic-2","payload":"{\"name\":\"broken\",\"action\":\"oops\""}`,
 		`{"payload":"{\"name\":\"user5\",\"action\":\"purchase\",\"timestamp\":\"2024-01-01T10:20:00Z\",\"amount\":99.99}"}`,
-		// Completely non-conforming (raw JSON, not enveloped)
 		`{"name":"raw_no_envelope"}`,
-		// Empty and whitespace
-		``,
-		`   `,
 	}
 
 	fmt.Println("Enqueuing test data...")
@@ -85,6 +80,29 @@ func testEngineQueue() {
 
 	fmt.Println("EngineQueue test complete")
 }
+
+type appOne struct{}
+
+func (appOne) Accept(topic string) bool {
+	return strings.Contains(topic, "1") || strings.EqualFold(topic, "one")
+}
+func (appOne) Handle(env queue.EventEnvelope) (queue.EventEnvelope, error) { return env, nil }
+
+type appTwo struct{}
+
+func (appTwo) Accept(topic string) bool {
+	return strings.Contains(topic, "2") || strings.EqualFold(topic, "two")
+}
+func (appTwo) Handle(env queue.EventEnvelope) (queue.EventEnvelope, error) { return env, nil }
+
+type appThree struct{}
+
+func (appThree) Accept(topic string) bool {
+	return strings.Contains(topic, "3") || strings.EqualFold(topic, "three")
+}
+func (appThree) Handle(env queue.EventEnvelope) (queue.EventEnvelope, error) { return env, nil }
+
+type envelopeAlias = struct{ Topic, Payload string }
 
 func latestSimulationInput() (string, error) {
 	base := os.Getenv("SIMULATIONS_DIR")

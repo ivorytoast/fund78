@@ -28,6 +28,7 @@ type Queue struct {
 	outputFile       *os.File
 	inputFileLatest  *os.File
 	outputFileLatest *os.File
+	apps             []Application
 }
 
 func NewEngineQueue() *Queue {
@@ -139,16 +140,23 @@ func (q *Queue) process() {
 			}
 
 			if q.isValidEvent(item) {
-				processedItem := item + " (processed)"
-				q.logToOutputFile(processedItem)
+				var env EventEnvelope
+				_ = json.Unmarshal([]byte(item), &env)
+				out := q.routeEvent(env)
+				outBytes, _ := json.Marshal(out)
+				outLine := string(outBytes)
+				q.logToOutputFile(outLine)
 				select {
-				case q.output <- item:
+				case q.output <- outLine:
 				case <-q.done:
 					return
 				}
 			} else {
-				rejectedItem := item + " (rejected - invalid JSON)"
-				q.logToOutputFile(rejectedItem)
+				// Write standardized error envelope
+				errEnv := EventEnvelope{Topic: "error", Payload: fmt.Sprintf("{\"reason\":\"invalid_event\",\"original\":%q}", item)}
+				outBytes, _ := json.Marshal(errEnv)
+				outLine := string(outBytes)
+				q.logToOutputFile(outLine)
 			}
 		case <-q.done:
 			return
@@ -179,13 +187,13 @@ func (q *Queue) isValidJSON(s string) bool {
 	return json.Unmarshal([]byte(s), &js) == nil
 }
 
-type eventEnvelope struct {
+type EventEnvelope struct {
 	Topic   string `json:"topic"`
 	Payload string `json:"payload"`
 }
 
 func (q *Queue) isValidEvent(s string) bool {
-	var env eventEnvelope
+	var env EventEnvelope
 	if err := json.Unmarshal([]byte(s), &env); err != nil {
 		return false
 	}
@@ -200,6 +208,26 @@ func (q *Queue) isValidEvent(s string) bool {
 		return false
 	}
 	return true
+}
+
+type Application interface {
+	Accept(topic string) bool
+	Handle(env EventEnvelope) (EventEnvelope, error)
+}
+
+func (q *Queue) RegisterApplications(apps ...Application) {
+	q.apps = append(q.apps, apps...)
+}
+
+func (q *Queue) routeEvent(env EventEnvelope) EventEnvelope {
+	for _, app := range q.apps {
+		if app.Accept(env.Topic) {
+			if out, err := app.Handle(env); err == nil && strings.TrimSpace(out.Topic) != "" && q.isValidJSON(out.Payload) {
+				return out
+			}
+		}
+	}
+	return env
 }
 
 func (q *Queue) Enqueue(item string) error {
