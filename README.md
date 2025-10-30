@@ -25,22 +25,15 @@ simulations/YYYY/MM/DD/
 ```
 go run main.go
 ```
-Finds the latest `simulations/YYYY/MM/DD/input.log` and replays it.
+Finds the latest `simulations/YYYY/MM/DD/input.log` and replays it. Per-run debug logs are written under `simulations/YYYY/MM/DD/debug/` with a timestamp matching the source input.
 
-### Run the UI and send events (Engine mode)
+### Compare debug vs timestamped output
 ```
-go run cmd/ui/main.go
+go run main.go compare
 ```
-Open http://localhost:8080 and submit:
-- topic (string)
-- payload (JSON string), e.g. {"k":"v"}
-
-Or via curl:
-```
-curl -X POST http://localhost:8080/send \
-  -d 'topic=auth' \
-  --data-urlencode 'payload={"user":"alice","action":"login"}'
-```
+For each `simulations/YYYY/MM/DD/debug/output_debug_HHMMSS.log`, compares against `simulations/YYYY/MM/DD/output_HHMMSS.log` and prints:
+- identical | different
+- for differences, the first differing line number and both line values
 
 ## Event schema
 Every event must be a JSON envelope:
@@ -64,13 +57,13 @@ simulations/
     input.log              # latest input (real file)
     output.log             # latest output (real file)
     debug/
-      input_debug_HHMMSS.log    # Replay per-run debug
-      output_debug_HHMMSS.log
+      input_debug_HHMMSS.log    # Replay per-run debug (input mirror)
+      output_debug_HHMMSS.log   # Replay per-run debug (output mirror)
 ```
 
 ## Environment variables
 - `SIMULATIONS_DIR`: override base folder for simulations (default: `simulations`)
-- `PORT`: UI server port (default: `8080`)
+  (UI is optional; if used: `PORT` controls server port, default `8080`)
 
 ## Development
 
@@ -83,7 +76,7 @@ Tests run with a temporary `SIMULATIONS_DIR` and remove all files/folders after 
 ### Commands recap
 - Engine: `go run main.go engine`
 - Replay: `go run main.go`
-- UI: `go run cmd/ui/main.go` then open http://localhost:8080
+- Compare: `go run main.go compare`
 
 ## Notes
 - Engine writes both timestamped logs and latest real files.

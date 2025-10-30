@@ -24,6 +24,7 @@ Logging/storage behavior:
   - Creates per-run debug logs in `simulations/YYYY/MM/DD/debug/` with matching timestamp to the source input file:
     - `input_debug_HHMMSS.log`, `output_debug_HHMMSS.log`
   - If starting from `input.log`, the timestamp is derived from the latest `input_*.log` in the same directory.
+  - A CLI compare utility (`go run main.go compare`) compares each `debug/output_debug_HHMMSS.log` to its corresponding timestamped `output_HHMMSS.log` in the parent day folder and reports identical/different with the first differing line when applicable.
 
 ## Application Requirements
 
@@ -92,7 +93,7 @@ fund78/
 │   ├── AGENT_INSTRUCTIONS.md
 │   └── .cursorrules
 ├── cmd/
-│   └── ui/
+│   └── ui/           # (optional; may be absent in some environments)
 │       └── main.go
 ├── go.mod
 └── go.sum

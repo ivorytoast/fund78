@@ -14,11 +14,17 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "engine" {
-		testEngineQueue()
-	} else {
-		testReplayQueue()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "engine":
+			testEngineQueue()
+			return
+		case "compare":
+			runCompare()
+			return
+		}
 	}
+	testReplayQueue()
 }
 
 func testReplayQueue() {
@@ -79,6 +85,123 @@ func testEngineQueue() {
 	time.Sleep(2 * time.Second)
 
 	fmt.Println("EngineQueue test complete")
+}
+
+func runCompare() {
+	base := os.Getenv("SIMULATIONS_DIR")
+	if base == "" {
+		base = "simulations"
+	}
+	var rows []struct {
+		outPath   string
+		identical bool
+		diffLine  int
+		note      string
+		outSample string
+		inSample  string
+	}
+	_ = filepath.Walk(base, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		name := info.Name()
+		if strings.HasPrefix(name, "output_debug_") && strings.HasSuffix(name, ".log") {
+			ts := strings.TrimSuffix(strings.TrimPrefix(name, "output_debug_"), ".log")
+			debugDir := filepath.Dir(p)
+			dayDir := filepath.Dir(debugDir)
+			inPath := filepath.Join(dayDir, "output_"+ts+".log")
+			same := false
+			diffLine := 0
+			note := ""
+			outSample, inSample := "", ""
+			if bOut, e1 := os.ReadFile(p); e1 == nil {
+				if bIn, e2 := os.ReadFile(inPath); e2 == nil {
+					same, diffLine, note, outSample, inSample = compareFiles(string(bOut), string(bIn))
+				}
+			}
+			rows = append(rows, struct {
+				outPath   string
+				identical bool
+				diffLine  int
+				note      string
+				outSample string
+				inSample  string
+			}{outPath: p, identical: same, diffLine: diffLine, note: note, outSample: outSample, inSample: inSample})
+		}
+		return nil
+	})
+
+	if len(rows) == 0 {
+		fmt.Println("No debug output files found.")
+		return
+	}
+	fmt.Println("Debug comparisons (output_debug vs input_debug):")
+	for _, r := range rows {
+		status := "different"
+		if r.identical {
+			status = "identical"
+		}
+		if r.identical {
+			fmt.Printf("- %s => %s\n", r.outPath, status)
+		} else {
+			if r.diffLine > 0 {
+				fmt.Printf("- %s => %s (first difference at line %d; %s)\n", r.outPath, status, r.diffLine, r.note)
+				if r.outSample != "" || r.inSample != "" {
+					fmt.Printf("  output: %s\n", r.outSample)
+					fmt.Printf("  input : %s\n", r.inSample)
+				}
+			} else {
+				fmt.Printf("- %s => %s (unable to locate differing line)\n", r.outPath, status)
+			}
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func compareFiles(outContent, inContent string) (bool, int, string, string, string) {
+	normalize := func(s string) []string {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+		lines := strings.Split(s, "\n")
+		// trim trailing empty lines
+		i := len(lines) - 1
+		for i >= 0 && strings.TrimSpace(lines[i]) == "" {
+			i--
+		}
+		lines = lines[:i+1]
+		for j := range lines {
+			lines[j] = strings.TrimRight(lines[j], " \t")
+		}
+		return lines
+	}
+	outLines := normalize(outContent)
+	inLines := normalize(inContent)
+	max := len(outLines)
+	if len(inLines) > max {
+		max = len(inLines)
+	}
+	for i := 0; i < max; i++ {
+		var ol, il string
+		if i < len(outLines) {
+			ol = outLines[i]
+		}
+		if i < len(inLines) {
+			il = inLines[i]
+		}
+		if ol != il {
+			return false, i + 1, "output != input", ol, il
+		}
+	}
+	return true, 0, "", "", ""
 }
 
 type appOne struct{}
