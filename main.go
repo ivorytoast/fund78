@@ -160,13 +160,6 @@ func runCompare() {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func compareFiles(outContent, inContent string) (bool, int, string, string, string) {
 	normalize := func(s string) []string {
 		s = strings.ReplaceAll(s, "\r\n", "\n")
@@ -224,8 +217,6 @@ func (appThree) Accept(topic string) bool {
 	return strings.Contains(topic, "3") || strings.EqualFold(topic, "three")
 }
 func (appThree) Handle(env queue.EventEnvelope) (queue.EventEnvelope, error) { return env, nil }
-
-type envelopeAlias = struct{ Topic, Payload string }
 
 func latestSimulationInput() (string, error) {
 	base := os.Getenv("SIMULATIONS_DIR")
