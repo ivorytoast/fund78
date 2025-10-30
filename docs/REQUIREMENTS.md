@@ -49,6 +49,11 @@ Logging/storage behavior:
   - Engine logging to timestamped files + latest real files
   - Replay debug logging per-run with matching timestamps
   - Graceful shutdown when processing complete
+- [x] Event schema validation
+  - Each event must be a JSON envelope:
+    - `topic`: string (non-empty)
+    - `payload`: string containing valid JSON
+  - Payload must be valid JSON when parsed from the string
 - [ ] Queue persistence
 - [ ] Queue monitoring/metrics
 - [ ] Multiple queue support
@@ -86,6 +91,9 @@ fund78/
 │   ├── REQUIREMENTS.md
 │   ├── AGENT_INSTRUCTIONS.md
 │   └── .cursorrules
+├── cmd/
+│   └── ui/
+│       └── main.go
 ├── go.mod
 └── go.sum
 ```
@@ -113,6 +121,7 @@ fund78/
 - [x] Add comprehensive test suite
 - [ ] Add configuration management
 - [ ] Add CLI interface
+- [ ] Add minimal UI for sending events (topic, payload)
 
 ### Medium Term (3-6 months)
 - Add advanced features
