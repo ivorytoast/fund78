@@ -1,28 +1,9 @@
-use std::collections::VecDeque;
-use std::io::Write;
-
-use fund78::create_or_overwrite_file;
+use fund78::engine_process;
+use fund78::sample::{sample_events, sample_workers};
 
 fn main() {
-    let mut file = match create_or_overwrite_file("out.log") {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Failed to create or open file: {}", e);
-            return;
-        }
-    };
+    let events = sample_events();
+    let workers = sample_workers();
 
-    let mut tasks = VecDeque::new();
-    tasks.push_back(10);
-    tasks.push_back(20);
-    tasks.push_back(30);
-
-    while let Some(task) = tasks.pop_back() {
-        if let Err(e) = writeln!(file, "{}", task) {
-            eprintln!("Failed to write to file: {}", e);
-            return;
-        }
-    }
-
-    println!("Tasks written successfully!")
+    engine_process(events, workers);
 }
