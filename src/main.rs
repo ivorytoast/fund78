@@ -20,3 +20,11 @@ fn main() {
 
     engine.run();
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_create_or_open_file_new() {
+        println!("HI");
+    }
+}
