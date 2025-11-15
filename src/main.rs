@@ -1,10 +1,11 @@
 use ::serde::Deserialize;
-use ::std::sync::{Arc, mpsc};
+use ::std::sync::Arc;
 use dotenv::dotenv;
 use fund78::{Engine, Event, Worker};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::VecDeque;
 use std::env;
+use std::sync::mpsc;
 use std::thread;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
@@ -27,25 +28,35 @@ struct CryptoTrade {
 fn main() {
     dotenv().ok();
 
-    let (event_tx, event_rx) = mpsc::channel::<Event>();
+    let (polygon_tx, engine_rx) = mpsc::channel::<Event>();
 
-    let (tx, _rx) = broadcast::channel::<String>(100);
-    let tx = Arc::new(tx);
-
-    let tx_clone = tx.clone();
+    let (engine_tx, _) = broadcast::channel::<String>(100);
+    let engine_tx = Arc::new(engine_tx);
 
     let polygon_handle = thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(get_market_data(tx_clone, event_tx));
+        rt.block_on(get_market_data(polygon_tx));
+    });
+
+    let engine_tx_clone = engine_tx.clone();
+    let engine_handle = thread::spawn(move || {
+        run_engine(engine_rx, engine_tx_clone);
     });
 
     let ws_handle = thread::spawn(|| {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(run_websocket_server(tx));
+        rt.block_on(run_websocket_server(engine_tx));
     });
 
-    let mut events: VecDeque<Event> = VecDeque::new();
+    println!("All systems running...");
+    println!("Data flow: Polygon -> Engine -> WebSocket Clients");
 
+    polygon_handle.join().unwrap();
+    engine_handle.join().unwrap();
+    ws_handle.join().unwrap();
+}
+
+fn run_engine(engine_rx: mpsc::Receiver<Event>, broadcast_tx: Arc<broadcast::Sender<String>>) {
     let mut workers: Vec<Worker> = Vec::new();
     workers.push(Worker {
         handles_task: "bitcoin_price".to_string(),
@@ -54,33 +65,32 @@ fn main() {
 
     let mut engine = Engine::new(workers).expect("Failed to create engine");
 
-    let engine_handle = thread::spawn(move || {
-        let mut pending_events = VecDeque::new();
+    let mut pending_events = VecDeque::new();
 
-        loop {
-            match event_rx.recv() {
-                Ok(event) => {
+    loop {
+        match engine_rx.recv() {
+            Ok(event) => {
+                pending_events.push_back(event.clone());
+
+                while let Ok(event) = engine_rx.try_recv() {
                     pending_events.push_back(event);
-
-                    while let Ok(event) = event_rx.try_recv() {
-                        pending_events.push_back(event);
-                    }
-
-                    engine.process(pending_events.clone());
-                    pending_events.clear();
                 }
-                Err(_) => {
-                    println!("Event channel closed, shutting down engine");
-                    break;
+
+                engine.process(pending_events.clone());
+
+                for event in &pending_events {
+                    let json = serde_json::to_string(&event).unwrap();
+                    let _ = broadcast_tx.send(json);
                 }
+
+                pending_events.clear();
+            }
+            Err(_) => {
+                println!("Polygon channel closed, shutting down engine");
+                break;
             }
         }
-    });
-
-    println!("All systems running...");
-    ws_handle.join().unwrap();
-    polygon_handle.join().unwrap();
-    engine_handle.join().unwrap();
+    }
 }
 
 fn handle_bitcoin_price(payload: i32) -> Event {
@@ -97,7 +107,7 @@ fn handle_bitcoin_price(payload: i32) -> Event {
     }
 }
 
-async fn get_market_data(tx: Arc<broadcast::Sender<String>>, event_tx: mpsc::Sender<Event>) {
+async fn get_market_data(event_tx: mpsc::Sender<Event>) {
     let api_key = env::var("POLYGON_API_KEY").expect("POLYGON_API_KEY must be set in .env file");
     let url = format!("wss://socket.massive.com/crypto");
 
@@ -145,7 +155,6 @@ async fn get_market_data(tx: Arc<broadcast::Sender<String>>, event_tx: mpsc::Sen
                                 return;
                             }
                         }
-                        let _ = tx.send(text);
                     }
                     Err(e) => {
                         eprintln!("Failed to deserialize trade data: {}", e);
@@ -158,12 +167,13 @@ async fn get_market_data(tx: Arc<broadcast::Sender<String>>, event_tx: mpsc::Sen
     }
 }
 
-async fn run_websocket_server(tx: Arc<broadcast::Sender<String>>) {
+async fn run_websocket_server(broadcast_tx: Arc<broadcast::Sender<String>>) {
     let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
     println!("Websocket server running on ws://127.0.0.1:8080");
+    println!("Client will receive processed events from Engine");
 
     while let Ok((stream, _)) = listener.accept().await {
-        let rx = tx.subscribe();
+        let rx = broadcast_tx.subscribe();
         tokio::spawn(handle_connection(stream, rx));
     }
 }
@@ -178,10 +188,10 @@ async fn handle_connection(stream: TcpStream, mut rx: broadcast::Receiver<String
     };
 
     let (mut write, _read) = ws_stream.split();
-    println!("Client connected");
+    println!("Client connected - will receive processed engine outputs");
 
-    while let Ok(price_data) = rx.recv().await {
-        if write.send(Message::Text(price_data)).await.is_err() {
+    while let Ok(processed_event) = rx.recv().await {
+        if write.send(Message::Text(processed_event)).await.is_err() {
             println!("Client disconnected");
             break;
         }

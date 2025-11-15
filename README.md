@@ -82,9 +82,9 @@ You should see real-time Bitcoin trade data streaming in.
 ### High-Level Data Flow
 
 ```
-Polygon.io → Bitcoin Trade Event → Engine Processing → WebSocket Broadcast
-                                  ↓
-                            in.log & out.log
+Polygon.io → Engine Processing → WebSocket Broadcast
+                    ↓
+              in.log & out.log
 ```
 
 ### Detailed Internal Flow
@@ -98,29 +98,28 @@ Polygon.io → Bitcoin Trade Event → Engine Processing → WebSocket Broadcast
 │  - Thread Spawning  │
 └─────────────────────┘
           │
-          ├──────────────────────────────────────────────┐
-          │                                              │
-          ▼                                              ▼
-┌─────────────────────┐                    ┌─────────────────────┐
-│  Polygon Thread     │                    │  WebSocket Thread   │
-│  (Tokio Runtime)    │                    │  (Tokio Runtime)    │
-│                     │                    │                     │
-│  Connects to        │                    │  Listens on         │
-│  Polygon.io WSS     │                    │  localhost:8080     │
-└─────────────────────┘                    └─────────────────────┘
-          │                                              │
-          │ Sends Event                                  │ Broadcasts
-          │ via mpsc::channel                            │ via broadcast::channel
-          ▼                                              ▼
-┌─────────────────────┐                    ┌─────────────────────┐
-│  Engine Thread      │                    │  Connected Clients  │
-│                     │                    │  (Browsers, Apps)   │
-│  Processes Events   │                    └─────────────────────┘
-│  via Workers        │
-│                     │
-│  Writes to Logs     │
-└─────────────────────┘
+          ├───────────────────┬───────────────────┐
+          ▼                   ▼                   ▼
+┌─────────────────────┐ ┌──────────────────┐ ┌─────────────────────┐
+│  Polygon Thread     │ │  Engine Thread   │ │  WebSocket Thread   │
+│  (Tokio Runtime)    │ │                  │ │  (Tokio Runtime)    │
+│                     │ │  Central Hub     │ │                     │
+│  Connects to        │ │                  │ │  Listens on         │
+│  Polygon.io WSS     │ │  Processes       │ │  localhost:8080     │
+│                     │ │  Events via      │ │                     │
+│  Receives Bitcoin   │ │  Workers         │ │  Broadcasts to      │
+│  trades             │ │                  │ │  Connected Clients  │
+└─────────────────────┘ └──────────────────┘ └─────────────────────┘
+          │                   ▲ │                   ▲
+          │ mpsc::channel     │ │ broadcast::channel│
+          │ (polygon_tx)      │ │ (engine_tx)       │
+          └───────────────────┘ └───────────────────┘
+          
+          Sends Event         Broadcasts Output
+          to Engine           to Clients
 ```
+
+**Important**: Polygon thread and WebSocket thread NEVER communicate directly. All data flows through the Engine thread.
 
 #### Bitcoin Price Flow (Step-by-Step)
 
@@ -149,13 +148,14 @@ Polygon.io → Bitcoin Trade Event → Engine Processing → WebSocket Broadcast
    
 4. Send to Engine via mpsc::channel
    ↓
-   event_tx.send(event) 
+   polygon_tx.send(event) 
    
    [Channel automatically wakes Engine Thread]
    
 5. Engine Thread receives event
    ↓
-   event_rx.recv() → Returns Event
+   [Engine Thread - run_engine()]
+   engine_rx.recv() → Returns Event
    
 6. Write to in.log
    ↓
@@ -179,42 +179,81 @@ Polygon.io → Bitcoin Trade Event → Engine Processing → WebSocket Broadcast
 10. Write to out.log
     ↓
     {"task":"bitcoin_price_accepted","payload":0}
+
+11. Broadcast processed event to WebSocket clients
+    ↓
+    engine_tx.send(json_string)
+    
+12. WebSocket Thread receives and forwards to clients
+    ↓
+    [WebSocket Thread - handle_connection()]
+    All connected clients receive:
+    {"task":"bitcoin_price","payload":96261}
 ```
 
-#### Concurrent Broadcast Flow
-
-While the engine processes events, the Polygon thread also broadcasts raw data:
+#### Complete Data Flow Diagram
 
 ```
-Polygon Thread
-   │
-   ├─── event_tx.send(event) ──→ [Engine Thread]
-   │
-   └─── broadcast_tx.send(json) ──→ [Broadcast Channel]
-                                          │
-                                          ├──→ Client 1
-                                          ├──→ Client 2  
-                                          └──→ Client N
+┌──────────────┐
+│ Polygon.io   │
+└──────┬───────┘
+       │ Bitcoin Trade JSON
+       ▼
+┌──────────────────────┐
+│  Polygon Thread      │
+│  - Deserialize       │
+│  - Create Event      │
+└──────┬───────────────┘
+       │ mpsc::channel
+       │ Event struct
+       ▼
+┌──────────────────────┐
+│  Engine Thread       │
+│  - Write in.log      │ ──────► in.log
+│  - Match Worker      │
+│  - Process Event     │
+│  - Write out.log     │ ──────► out.log
+│  - Broadcast Output  │
+└──────┬───────────────┘
+       │ broadcast::channel
+       │ JSON string
+       ▼
+┌──────────────────────┐
+│  WebSocket Thread    │
+│  - Accept Clients    │
+│  - Forward Messages  │
+└──────┬───────────────┘
+       │
+       ├──────► Client 1 (Browser)
+       ├──────► Client 2 (Browser)
+       └──────► Client N (Browser)
 ```
 
 ### Channel Types Used
 
 1. **`mpsc::channel`** (Polygon → Engine)
+   - **Sender**: `polygon_tx` (Polygon thread)
+   - **Receiver**: `engine_rx` (Engine thread)
    - Multi-producer, single-consumer
-   - Used for: Sending Bitcoin price events to engine
+   - Used for: Sending Bitcoin price events from Polygon to Engine
    - Blocking: Engine thread sleeps until events arrive (zero CPU when idle)
 
-2. **`broadcast::channel`** (Polygon → WebSocket Clients)
+2. **`broadcast::channel`** (Engine → WebSocket Clients)
+   - **Sender**: `engine_tx` (Engine thread)
+   - **Receivers**: One per WebSocket client connection
    - Multi-producer, multi-consumer
-   - Used for: Broadcasting raw JSON to all connected WebSocket clients
+   - Used for: Broadcasting processed engine outputs to all connected WebSocket clients
    - Non-blocking: Clients receive updates asynchronously
 
-### Why Channels?
+### Why This Architecture?
 
-- **Zero CPU Usage When Idle**: The engine thread blocks on `recv()` instead of polling
-- **Thread Safety**: Safe communication between threads without locks
-- **Immediate Processing**: Events are processed instantly when they arrive
-- **Batch Optimization**: Multiple events arriving simultaneously are processed together
+- **Separation of Concerns**: Polygon handles input, Engine processes, WebSocket handles output
+- **Central Processing**: All business logic and logging happens in the Engine thread
+- **Zero CPU Usage When Idle**: Engine thread blocks on `recv()` instead of polling
+- **Thread Safety**: Safe communication between threads without locks or mutexes
+- **Immediate Processing**: Events are processed instantly when they arrive from Polygon
+- **Scalable Broadcasting**: Multiple WebSocket clients can connect without affecting performance
+- **Clean Testing**: Engine can be tested independently of Polygon and WebSocket connections
 
 ## Project Structure
 
