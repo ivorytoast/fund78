@@ -5,7 +5,8 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Result;
 use std::io::Write;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
 use tokio::sync::broadcast;
 
 pub mod input;
@@ -22,6 +23,96 @@ pub struct Event {
     pub payload: i32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestStats {
+    pub count: u64,
+    #[serde(serialize_with = "serialize_duration")]
+    pub total_duration: Duration,
+    #[serde(serialize_with = "serialize_option_duration")]
+    pub min_duration: Option<Duration>,
+    #[serde(serialize_with = "serialize_option_duration")]
+    pub max_duration: Option<Duration>,
+    #[serde(serialize_with = "serialize_option_duration")]
+    pub average_duration: Option<Duration>,
+}
+
+fn serialize_duration<S>(duration: &Duration, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_u128(duration.as_micros())
+}
+
+fn serialize_option_duration<S>(
+    duration: &Option<Duration>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match duration {
+        Some(d) => serializer.serialize_some(&d.as_micros()),
+        None => serializer.serialize_none(),
+    }
+}
+
+impl RequestStats {
+    fn new() -> Self {
+        RequestStats {
+            count: 0,
+            total_duration: Duration::ZERO,
+            min_duration: None,
+            max_duration: None,
+            average_duration: None,
+        }
+    }
+
+    fn update(&mut self, duration: Duration) {
+        self.count += 1;
+        self.total_duration += duration;
+
+        self.min_duration = Some(match self.min_duration {
+            Some(min) => min.min(duration),
+            None => duration,
+        });
+
+        self.max_duration = Some(match self.max_duration {
+            Some(max) => max.max(duration),
+            None => duration,
+        });
+
+        // Update the average
+        self.average_duration = Some(self.total_duration / self.count as u32);
+    }
+
+    fn average(&self) -> Option<Duration> {
+        self.average_duration
+    }
+
+    fn print_stats(&self) {
+        println!("\n=== Request Statistics ===");
+        println!("Total requests: {}", self.count);
+        if let Some(avg) = self.average_duration {
+            println!("Average time: {:?}", avg);
+        }
+        if let Some(min) = self.min_duration {
+            println!("Fastest request: {:?}", min);
+        }
+        if let Some(max) = self.max_duration {
+            println!("Slowest request: {:?}", max);
+        }
+        println!("========================\n");
+    }
+
+    fn to_json(&self) -> String {
+        serde_json::json!({
+            "type": "stats",
+            "data": self
+        })
+        .to_string()
+    }
+}
+
 pub struct Engine {
     in_file: File,
     out_file: File,
@@ -31,6 +122,7 @@ pub struct Engine {
     input_sender: mpsc::Sender<Event>,
     input_receiver: mpsc::Receiver<Event>,
     broadcast_sender: Arc<broadcast::Sender<String>>,
+    stats: RequestStats,
 }
 
 impl Engine {
@@ -54,6 +146,7 @@ impl Engine {
             input_sender,
             input_receiver,
             broadcast_sender: Arc::new(broadcast_sender),
+            stats: RequestStats::new(),
         })
     }
 
@@ -87,6 +180,7 @@ impl Engine {
             input_sender,
             input_receiver,
             broadcast_sender,
+            mut stats,
         } = self;
 
         // Spawn a thread for each input
@@ -133,7 +227,13 @@ impl Engine {
                         }
 
                         // Process all pending events
-                        process_events(&mut in_file, &mut out_file, &workers, pending_events.clone());
+                        process_events(
+                            &mut in_file,
+                            &mut out_file,
+                            &workers,
+                            pending_events.clone(),
+                            &mut stats,
+                        );
 
                         // Broadcast events to all outputs
                         for event in &pending_events {
@@ -141,10 +241,15 @@ impl Engine {
                             let _ = broadcast_sender.send(json);
                         }
 
+                        // Broadcast stats update to all outputs
+                        let stats_json = stats.to_json();
+                        let _ = broadcast_sender.send(stats_json);
+
                         pending_events.clear();
                     }
                     Err(_) => {
                         println!("All inputs closed, shutting down engine");
+                        stats.print_stats();
                         break;
                     }
                 }
@@ -176,7 +281,13 @@ impl Engine {
     }
 
     pub fn process(&mut self, events: VecDeque<Event>) {
-        process_events(&mut self.in_file, &mut self.out_file, &self.workers, events);
+        process_events(
+            &mut self.in_file,
+            &mut self.out_file,
+            &self.workers,
+            events,
+            &mut self.stats,
+        );
     }
 }
 
@@ -224,8 +335,6 @@ pub fn engine_process(mut events: VecDeque<Event>, workers: Vec<Box<dyn Worker>>
             }
         }
     }
-
-    println!("Events written successfully!")
 }
 
 fn create_or_append_file(file_name: &str) -> Result<File> {
@@ -241,8 +350,11 @@ fn process_events(
     out_file: &mut File,
     workers: &[Box<dyn Worker>],
     mut events: VecDeque<Event>,
+    stats: &mut RequestStats,
 ) {
     while let Some(task) = events.pop_back() {
+        let start = std::time::Instant::now();
+
         if let Err(e) = serde_json::to_writer(&mut *in_file, &task) {
             eprintln!("Failed to write to IN file: {}", e);
             return;
@@ -265,8 +377,20 @@ fn process_events(
                 }
             }
         }
+
+        let duration = start.elapsed();
+        stats.update(duration);
+
+        println!(
+            "Request '{}' took {:?} | Avg: {:?} | Min: {:?} | Max: {:?} | Count: {}",
+            task.task,
+            duration,
+            stats.average().unwrap_or(Duration::ZERO),
+            stats.min_duration.unwrap_or(Duration::ZERO),
+            stats.max_duration.unwrap_or(Duration::ZERO),
+            stats.count
+        );
     }
-    println!("Events written successfully!")
 }
 
 #[cfg(test)]

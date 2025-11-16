@@ -67,10 +67,10 @@ impl Input for PolygonInput {
                         match serde_json::from_str::<Vec<CryptoTrade>>(&text) {
                             Ok(trades) => {
                                 for trade in trades {
-                                    println!(
-                                        "Bitcoin trade: price=${}, size={}, time={}",
-                                        trade.p, trade.s, trade.t
-                                    );
+                                    // println!(
+                                    //     "Bitcoin trade: price=${}, size={}, time={}",
+                                    //     trade.p, trade.s, trade.t
+                                    // );
 
                                     let event = Event {
                                         task: "bitcoin_price".to_string(),
