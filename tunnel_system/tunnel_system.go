@@ -52,21 +52,20 @@ type InputGenerator interface {
 
 // IntervalGenerator generates events at fixed time intervals
 type IntervalGenerator struct {
-	ActionName  tunnel.ActionName
-	PayloadFunc func() string
-	Interval    time.Duration
+	InputFunc func() VisitorInput
+	Interval  time.Duration
 }
 
 func (g *IntervalGenerator) Start(ts *TunnelSystem) {
 	go func() {
 		for {
-			payload := g.PayloadFunc()
-			v := tunnel.NewInputAction(g.ActionName, payload)
+			input := g.InputFunc()
+			v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
 			ts.MainEntrance().Enter(v)
 			time.Sleep(g.Interval)
 		}
 	}()
-	log.Printf("Started interval generator: %s (interval: %v)", g.ActionName, g.Interval)
+	log.Printf("Started interval generator (interval: %v)", g.Interval)
 }
 
 // ConnectionGenerator generates events from external connections
@@ -83,21 +82,19 @@ func (g *ConnectionGenerator) Start(ts *TunnelSystem) {
 
 // Helper constructors for IntervalGenerator
 
-func NewInputGenerator(actionName tunnel.ActionName, payload string, interval time.Duration) *IntervalGenerator {
+func NewInputGenerator(input VisitorInput, interval time.Duration) *IntervalGenerator {
 	return &IntervalGenerator{
-		ActionName: actionName,
-		PayloadFunc: func() string {
-			return payload
+		InputFunc: func() VisitorInput {
+			return input
 		},
 		Interval: interval,
 	}
 }
 
-func NewCustomInputGenerator(actionName tunnel.ActionName, payloadFunc func() string, interval time.Duration) *IntervalGenerator {
+func NewCustomInputGenerator(inputFunc func() VisitorInput, interval time.Duration) *IntervalGenerator {
 	return &IntervalGenerator{
-		ActionName:  actionName,
-		PayloadFunc: payloadFunc,
-		Interval:    interval,
+		InputFunc: inputFunc,
+		Interval:  interval,
 	}
 }
 
