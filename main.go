@@ -22,7 +22,7 @@ func main() {
 		),
 	}
 
-	tunnelSystem := tunnel_system.NewTunnelSystem(generators)
+	tunnelSystem := tunnel_system.NewTunnelSystem(tunnel_system.Config{}, generators)
 
 	for {
 		v, err := tunnelSystem.MainEntrance().NextVisitor()

@@ -1,9 +1,11 @@
 package tunnel_system
 
 import (
+	"encoding/json"
 	"fmt"
 	"fund78/action_logger"
 	"fund78/tunnel"
+	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
 	"time"
@@ -18,35 +20,108 @@ type TunnelSystem struct {
 	sideEntrances []*tunnel.Tunnel
 }
 
-// InputGenerator defines a configuration for an automatic input generator
-type InputGenerator struct {
+// Config for TunnelSystem with optional built-in generators
+type Config struct {
+	EnableHTTP      bool
+	HTTPPort        string
+	EnableWebSocket bool
+	WebSocketPort   string
+}
+
+// DefaultConfig returns a Config with sensible defaults
+func DefaultConfig() Config {
+	return Config{
+		EnableHTTP:      true,
+		HTTPPort:        ":8081",
+		EnableWebSocket: true,
+		WebSocketPort:   ":8082",
+	}
+}
+
+// VisitorInput represents the JSON structure for incoming visitor events
+type VisitorInput struct {
+	Topic   string `json:"topic"`
+	Payload string `json:"payload"`
+}
+
+// InputGenerator is the interface that both generator types implement
+type InputGenerator interface {
+	Start(*TunnelSystem)
+}
+
+// IntervalGenerator generates events at fixed time intervals
+type IntervalGenerator struct {
 	ActionName  tunnel.ActionName
 	PayloadFunc func() string
 	Interval    time.Duration
-	Enabled     bool
 }
 
-func NewInputGenerator(actionName tunnel.ActionName, payload string, interval time.Duration) InputGenerator {
-	return InputGenerator{
+func (g *IntervalGenerator) Start(ts *TunnelSystem) {
+	go func() {
+		for {
+			payload := g.PayloadFunc()
+			v := tunnel.NewInputAction(g.ActionName, payload)
+			ts.MainEntrance().Enter(v)
+			time.Sleep(g.Interval)
+		}
+	}()
+	log.Printf("Started interval generator: %s (interval: %v)", g.ActionName, g.Interval)
+}
+
+// ConnectionGenerator generates events from external connections
+type ConnectionGenerator struct {
+	StartFunc func(*tunnel.Tunnel)
+}
+
+func (g *ConnectionGenerator) Start(ts *TunnelSystem) {
+	go func() {
+		log.Printf("Started connection generator")
+		g.StartFunc(ts.MainEntrance())
+	}()
+}
+
+// Helper constructors for IntervalGenerator
+
+func NewInputGenerator(actionName tunnel.ActionName, payload string, interval time.Duration) *IntervalGenerator {
+	return &IntervalGenerator{
 		ActionName: actionName,
 		PayloadFunc: func() string {
 			return payload
 		},
 		Interval: interval,
-		Enabled:  true,
 	}
 }
 
-func NewCustomInputGenerator(actionName tunnel.ActionName, payloadFunc func() string, interval time.Duration) InputGenerator {
-	return InputGenerator{
+func NewCustomInputGenerator(actionName tunnel.ActionName, payloadFunc func() string, interval time.Duration) *IntervalGenerator {
+	return &IntervalGenerator{
 		ActionName:  actionName,
 		PayloadFunc: payloadFunc,
 		Interval:    interval,
-		Enabled:     true,
 	}
 }
 
-func NewTunnelSystem(generators []InputGenerator) *TunnelSystem {
+// Helper constructor for ConnectionGenerator
+
+func NewConnectionInputGenerator(startFunc func(*tunnel.Tunnel)) *ConnectionGenerator {
+	return &ConnectionGenerator{
+		StartFunc: startFunc,
+	}
+}
+
+func NewTunnelSystem(config Config, generators []InputGenerator) *TunnelSystem {
+	// If empty config passed, use defaults
+	if config.HTTPPort == "" && config.WebSocketPort == "" && !config.EnableHTTP && !config.EnableWebSocket {
+		config = DefaultConfig()
+	}
+
+	// Apply default ports if not specified
+	if config.EnableHTTP && config.HTTPPort == "" {
+		config.HTTPPort = ":8081"
+	}
+	if config.EnableWebSocket && config.WebSocketPort == "" {
+		config.WebSocketPort = ":8082"
+	}
+
 	sideEntrances := make([]*tunnel.Tunnel, 0)
 	sideEntrances = append(sideEntrances, tunnel.NewDebugTunnel())
 	tunnelSystem := &TunnelSystem{
@@ -55,6 +130,19 @@ func NewTunnelSystem(generators []InputGenerator) *TunnelSystem {
 	}
 	srv := newTunnelServer(tunnelSystem)
 	srv.start(":8080")
+
+	// Add built-in HTTP generator if enabled
+	if config.EnableHTTP {
+		httpGen := createHTTPGenerator(config.HTTPPort)
+		generators = append([]InputGenerator{httpGen}, generators...)
+	}
+
+	// Add built-in WebSocket generator if enabled
+	if config.EnableWebSocket {
+		wsGen := createWebSocketGenerator(config.WebSocketPort)
+		generators = append([]InputGenerator{wsGen}, generators...)
+	}
+
 	startInputGenerators(tunnelSystem, generators)
 	return tunnelSystem
 }
@@ -75,23 +163,100 @@ func (t *TunnelSystem) MainEntrance() *tunnel.Tunnel {
 
 func startInputGenerators(ts *TunnelSystem, generators []InputGenerator) {
 	for _, gen := range generators {
-		if !gen.Enabled {
-			continue
+		gen.Start(ts)
+	}
+}
+
+// createHTTPGenerator creates a built-in HTTP server generator
+func createHTTPGenerator(port string) *ConnectionGenerator {
+	return NewConnectionInputGenerator(func(t *tunnel.Tunnel) {
+		mux := http.NewServeMux()
+
+		mux.HandleFunc("/visitor", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			var input VisitorInput
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+
+			if input.Topic == "" {
+				http.Error(w, "Topic is required", http.StatusBadRequest)
+				return
+			}
+
+			v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
+			t.Enter(v)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+			log.Printf("HTTP: Received %s with payload: %s", input.Topic, input.Payload)
+		})
+
+		log.Printf("HTTP server listening on %s/visitor", port)
+		if err := http.ListenAndServe(port, mux); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	})
+}
+
+// createWebSocketGenerator creates a built-in WebSocket server generator
+func createWebSocketGenerator(port string) *ConnectionGenerator {
+	return NewConnectionInputGenerator(func(t *tunnel.Tunnel) {
+		upgrader := websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true // Allow all origins
+			},
 		}
 
-		// Capture the generator in the closure
-		g := gen
-		go func() {
-			for {
-				payload := g.PayloadFunc()
-				v := tunnel.NewInputAction(g.ActionName, payload)
-				ts.MainEntrance().Enter(v)
-				time.Sleep(g.Interval)
-			}
-		}()
+		mux := http.NewServeMux()
 
-		log.Printf("Started input generator: %s (interval: %v)", g.ActionName, g.Interval)
-	}
+		mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				log.Printf("WebSocket upgrade failed: %v", err)
+				return
+			}
+			defer conn.Close()
+
+			log.Printf("WebSocket client connected")
+
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					log.Printf("WebSocket read error: %v", err)
+					break
+				}
+
+				var input VisitorInput
+				if err := json.Unmarshal(message, &input); err != nil {
+					log.Printf("WebSocket invalid JSON: %v", err)
+					continue
+				}
+
+				if input.Topic == "" {
+					log.Printf("WebSocket: Topic is required")
+					continue
+				}
+
+				v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
+				t.Enter(v)
+
+				log.Printf("WebSocket: Received %s with payload: %s", input.Topic, input.Payload)
+			}
+		})
+
+		log.Printf("WebSocket server listening on %s/ws", port)
+		if err := http.ListenAndServe(port, mux); err != nil {
+			log.Printf("WebSocket server error: %v", err)
+		}
+	})
 }
 
 func newTunnelServer(tunnelSystem *TunnelSystem) *server {
