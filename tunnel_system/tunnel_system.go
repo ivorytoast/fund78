@@ -6,6 +6,7 @@ import (
 	"fund78/action_logger"
 	"fund78/tunnel"
 	"github.com/gorilla/websocket"
+	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"net/http"
 	"time"
@@ -157,6 +158,21 @@ func NewCustomTunnelSystem(mainEntrance *tunnel.Tunnel, sideEntrances []*tunnel.
 	return tunnelSystem
 }
 
+func (t *TunnelSystem) OpenUp() {
+	for {
+		v, err := t.MainEntrance().NextVisitor()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		v, err = t.MainEntrance().Exit(v)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+}
+
 func (t *TunnelSystem) MainEntrance() *tunnel.Tunnel {
 	return t.mainEntrance
 }
@@ -173,6 +189,17 @@ func createHTTPGenerator(port string) *ConnectionGenerator {
 		mux := http.NewServeMux()
 
 		mux.HandleFunc("/visitor", func(w http.ResponseWriter, r *http.Request) {
+			// Set CORS headers
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+			// Handle preflight OPTIONS request
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
 			if r.Method != http.MethodPost {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 				return

@@ -36,7 +36,6 @@ func NewActionLogger() *ActionLogger {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
 
 	sqlText := `
 CREATE TABLE IF NOT EXISTS replay_input (

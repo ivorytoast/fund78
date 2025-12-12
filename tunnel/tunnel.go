@@ -32,7 +32,7 @@ const (
 )
 
 type Tunnel struct {
-	queue    []*visitor
+	queue    chan *visitor
 	replayId int64
 	explorer *action_logger.ActionLogger
 }
@@ -58,16 +58,11 @@ func (t *Tunnel) Enter(v *visitor) {
 	assert.IsTrue(v.replayId != 0)
 
 	t.explorer.InsertAction(v.replayId, v.messageId, string(v.topic), v.causedBy, string(v.messageType), string(v.direction), v.payload, v.actionType)
-	t.queue = append(t.queue, v)
+	t.queue <- v
 }
 
 func (t *Tunnel) NextVisitor() (*visitor, error) {
-	if len(t.queue) == 0 {
-		return nil, fmt.Errorf("Queue is empty")
-	}
-	v := (t.queue)[0]
-	(t.queue)[0] = nil // Optional: zero out the element
-	t.queue = (t.queue)[1:]
+	v := <-t.queue
 
 	topic := GetTopic(v)
 	messageType := GetMessageType(v)
@@ -148,7 +143,7 @@ func NewNormalTunnel() *Tunnel {
 	replayId := fileId
 
 	return &Tunnel{
-		queue:    make([]*visitor, 0),
+		queue:    make(chan *visitor, 100),
 		replayId: replayId,
 		explorer: actionLogger,
 	}
@@ -158,7 +153,7 @@ func NewDebugTunnel() *Tunnel {
 	actionLogger := action_logger.NewActionLogger()
 
 	return &Tunnel{
-		queue:    make([]*visitor, 0),
+		queue:    make(chan *visitor, 100),
 		replayId: 0,
 		explorer: actionLogger,
 	}
