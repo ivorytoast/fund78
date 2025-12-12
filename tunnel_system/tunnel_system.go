@@ -6,7 +6,6 @@ import (
 	"fund78/tunnel"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -27,20 +26,7 @@ type InputGenerator struct {
 	Enabled     bool
 }
 
-// NewTickGenerator creates a generator for TICK actions with timestamp payloads
-func NewTickGenerator(interval time.Duration) InputGenerator {
-	return InputGenerator{
-		ActionName: tunnel.TICK,
-		PayloadFunc: func() string {
-			return strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-		},
-		Interval: interval,
-		Enabled:  true,
-	}
-}
-
-// NewStaticGenerator creates a generator with a static payload
-func NewStaticGenerator(actionName tunnel.ActionName, payload string, interval time.Duration) InputGenerator {
+func NewInputGenerator(actionName tunnel.ActionName, payload string, interval time.Duration) InputGenerator {
 	return InputGenerator{
 		ActionName: actionName,
 		PayloadFunc: func() string {
@@ -48,6 +34,15 @@ func NewStaticGenerator(actionName tunnel.ActionName, payload string, interval t
 		},
 		Interval: interval,
 		Enabled:  true,
+	}
+}
+
+func NewCustomInputGenerator(actionName tunnel.ActionName, payloadFunc func() string, interval time.Duration) InputGenerator {
+	return InputGenerator{
+		ActionName:  actionName,
+		PayloadFunc: payloadFunc,
+		Interval:    interval,
+		Enabled:     true,
 	}
 }
 

@@ -5,19 +5,24 @@ import (
 	"fund78/tunnel"
 	"fund78/tunnel_system"
 	_ "github.com/mattn/go-sqlite3"
-	"log"
+	"strconv"
 	"time"
 )
 
 func main() {
 	generators := []tunnel_system.InputGenerator{
-		tunnel_system.NewTickGenerator(1 * time.Second),
-		tunnel_system.NewStaticGenerator(tunnel.LOGON, "bob", 5*time.Second),
+		tunnel_system.NewInputGenerator(tunnel.TICK, strconv.FormatInt(time.Now().UTC().UnixNano(), 10), 1*time.Second),
+		tunnel_system.NewInputGenerator(tunnel.LOGON, "bob", 5*time.Second),
+		tunnel_system.NewCustomInputGenerator(
+			tunnel.TICK,
+			func() string {
+				return fmt.Sprintf("custom-tick-%d", time.Now().Unix())
+			},
+			3*time.Second,
+		),
 	}
 
 	tunnelSystem := tunnel_system.NewTunnelSystem(generators)
-
-	log.Println("Starting automatic input generators")
 
 	for {
 		v, err := tunnelSystem.MainEntrance().NextVisitor()
