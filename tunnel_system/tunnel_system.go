@@ -9,6 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -141,17 +142,17 @@ func NewTunnelSystem(config Config, generators []InputGenerator) *TunnelSystem {
 		generators = append([]InputGenerator{wsGen}, generators...)
 	}
 
-	startInputGenerators(tunnelSystem, generators)
-	return tunnelSystem
-}
+	engineTickGenerator := NewInputGenerator(
+		VisitorInput{
+			Topic:   string(tunnel.TICK),
+			Payload: strconv.FormatInt(time.Now().UTC().UnixNano(), 10),
+		},
+		1*time.Second,
+	)
 
-func NewCustomTunnelSystem(mainEntrance *tunnel.Tunnel, sideEntrances []*tunnel.Tunnel) *TunnelSystem {
-	tunnelSystem := &TunnelSystem{
-		mainEntrance:  mainEntrance,
-		sideEntrances: sideEntrances,
-	}
-	srv := newTunnelServer(tunnelSystem)
-	srv.start(":8080")
+	generators = append(generators, engineTickGenerator)
+
+	startInputGenerators(tunnelSystem, generators)
 	return tunnelSystem
 }
 
