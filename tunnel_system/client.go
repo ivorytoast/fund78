@@ -1,6 +1,7 @@
 package tunnel_system
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,88 +35,88 @@ func (s *server) start(port string) {
 }
 
 func (s *server) handleGetReplay(w http.ResponseWriter, r *http.Request) {
-	//// Extract replay ID from URL path
-	//var replayID int64
-	//path := r.URL.Path
-	//_, err := fmt.Sscanf(path, "/replay/%d", &replayID)
-	//if err != nil {
-	//	http.Error(w, "Invalid replay ID. Use /replay/{id}", http.StatusBadRequest)
-	//	return
-	//}
-	//
-	//// Get messages for this replay (already ordered from first to most recent)
-	//messages, err := s.tunnelSystem.mainEntrance().GetMessagesByReplayID(replayID)
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error fetching messages: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//// Print them out in order
-	//w.Header().Set("Content-Type", "text/plain")
-	//fmt.Fprintf(w, "Replay ID: %d\n", replayID)
-	//fmt.Fprintf(w, "Total Actions: %d\n", len(messages))
-	//fmt.Fprintf(w, "%s\n\n", "===========================================")
-	//
-	//for i, msg := range messages {
-	//	fmt.Fprintf(w, "[%d] Message ID: %s\n", i+1, msg.MessageID)
-	//	fmt.Fprintf(w, "    ActionName: %s\n", msg.Topic)
-	//	fmt.Fprintf(w, "    Type: %s | ActionDirection: %s | Action Type: %s\n", msg.MessageType, msg.Direction, msg.ActionType)
-	//	fmt.Fprintf(w, "    Caused By: %s\n", msg.CausedBy)
-	//	fmt.Fprintf(w, "    Payload: %s\n", msg.Payload)
-	//	fmt.Fprintf(w, "    Created At: %d\n", msg.CreatedAt)
-	//	fmt.Fprintf(w, "\n")
-	//}
+	// Extract replay ID from URL path
+	var replayID int64
+	path := r.URL.Path
+	_, err := fmt.Sscanf(path, "/replay/%d", &replayID)
+	if err != nil {
+		http.Error(w, "Invalid replay ID. Use /replay/{id}", http.StatusBadRequest)
+		return
+	}
+
+	// Get messages for this replay (already ordered from first to most recent)
+	messages, err := s.tunnelSystem.sideEntrance.actionLogger.GetMessagesByReplayID(replayID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching messages: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Print them out in order
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "Replay ID: %d\n", replayID)
+	fmt.Fprintf(w, "Total Actions: %d\n", len(messages))
+	fmt.Fprintf(w, "%s\n\n", "===========================================")
+
+	for i, msg := range messages {
+		fmt.Fprintf(w, "[%d] Message ID: %s\n", i+1, msg.MessageID)
+		fmt.Fprintf(w, "    ActionName: %s\n", msg.Topic)
+		fmt.Fprintf(w, "    Type: %s | ActionDirection: %s | Action Type: %s\n", msg.MessageType, msg.Direction, msg.ActionType)
+		fmt.Fprintf(w, "    Caused By: %s\n", msg.CausedBy)
+		fmt.Fprintf(w, "    Payload: %s\n", msg.Payload)
+		fmt.Fprintf(w, "    Created At: %d\n", msg.CreatedAt)
+		fmt.Fprintf(w, "\n")
+	}
 }
 
 func (s *server) handleRerunReplay(w http.ResponseWriter, r *http.Request) {
-	//// Extract replay ID from URL path
-	//var replayID int64
-	//path := r.URL.Path
-	//_, err := fmt.Sscanf(path, "/rerun/%d", &replayID)
-	//if err != nil {
-	//	http.Error(w, "Invalid replay ID. Use /rerun/{id}", http.StatusBadRequest)
-	//	return
-	//}
-	//
-	//// Get optional name from query parameter
-	//debugName := r.URL.Query().Get("name")
-	//if debugName == "" {
-	//	debugName = fmt.Sprintf("Debug of replay %d", replayID)
-	//}
-	//
-	//// Create a new replay entry as a child of the original
-	//debugReplayID, err := s.explorer.InsertReplay(debugName, "", 1, &replayID)
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error creating debug replay: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//// Get messages for this replay (ordered from first to most recent)
-	//messages, err := s.explorer.GetMessagesByReplayID(replayID)
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error fetching messages: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//// Re-enqueue all messages in order with the NEW debug replay ID
-	//for _, msg := range messages {
-	//	visitor := tunnel.NewVisitorFromActionRow(
-	//		msg.MessageID,
-	//		msg.Topic,
-	//		msg.CausedBy,
-	//		msg.MessageType,
-	//		msg.Direction,
-	//		msg.Payload,
-	//		debugReplayID,
-	//	)
-	//	s.path.Enter(visitor)
-	//}
-	//
-	//// Send response
-	//w.Header().Set("Content-Type", "text/plain")
-	//fmt.Fprintf(w, "Created debug replay %d (parent: %d) named '%s'\n", debugReplayID, replayID, debugName)
-	//fmt.Fprintf(w, "Successfully re-queued %d messages\n", len(messages))
-	//fmt.Fprintf(w, "Messages will be processed by the main loop\n")
+	// Extract replay ID from URL path
+	var replayID int64
+	path := r.URL.Path
+	_, err := fmt.Sscanf(path, "/rerun/%d", &replayID)
+	if err != nil {
+		http.Error(w, "Invalid replay ID. Use /rerun/{id}", http.StatusBadRequest)
+		return
+	}
+
+	// Get optional name from query parameter
+	debugName := r.URL.Query().Get("name")
+	if debugName == "" {
+		debugName = fmt.Sprintf("Debug of replay %d", replayID)
+	}
+
+	// Create a new replay entry as a child of the original
+	debugReplayID, err := s.tunnelSystem.sideEntrance.actionLogger.InsertReplay(debugName, "", 1, &replayID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating debug replay: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get messages for this replay (ordered from first to most recent)
+	messages, err := s.tunnelSystem.sideEntrance.actionLogger.GetMessagesByReplayID(replayID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching messages: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-enqueue all messages in order with the NEW debug replay ID
+	for _, msg := range messages {
+		visitor := NewVisitorFromActionRow(
+			msg.MessageID,
+			msg.Topic,
+			msg.CausedBy,
+			msg.MessageType,
+			msg.Direction,
+			msg.Payload,
+			debugReplayID,
+		)
+		s.tunnelSystem.sideEntrance.Enter(visitor)
+	}
+
+	// Send response
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "Created debug replay %d (parent: %d) named '%s'\n", debugReplayID, replayID, debugName)
+	fmt.Fprintf(w, "Successfully re-queued %d messages\n", len(messages))
+	fmt.Fprintf(w, "Messages will be processed by the main loop\n")
 }
 
 // Alternative handler if you prefer query parameter instead of path parameter
@@ -162,80 +163,80 @@ type DebugRunComparison struct {
 }
 
 func (s *server) handleCompareReplay(w http.ResponseWriter, r *http.Request) {
-	//// Extract replay ID from URL path
-	//var replayID int64
-	//path := r.URL.Path
-	//_, err := fmt.Sscanf(path, "/compare/%d", &replayID)
-	//if err != nil {
-	//	http.Error(w, "Invalid replay ID. Use /compare/{id}", http.StatusBadRequest)
-	//	return
-	//}
-	//
-	//// Get the original replay info
-	//allReplays, err := s.explorer.GetAllReplays()
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error fetching replays: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//var originalReplay *action_logger.Replay
-	//for _, r := range allReplays {
-	//	if r.ID == replayID {
-	//		originalReplay = &r
-	//		break
-	//	}
-	//}
-	//
-	//if originalReplay == nil {
-	//	http.Error(w, fmt.Sprintf("Replay %d not found", replayID), http.StatusNotFound)
-	//	return
-	//}
-	//
-	//// Get original actions
-	//originalActions, err := s.explorer.GetMessagesByReplayID(replayID)
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error fetching original actions: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//// Get all child replays (debug runs)
-	//childReplays, err := s.explorer.GetChildReplays(replayID)
-	//if err != nil {
-	//	http.Error(w, fmt.Sprintf("Error fetching child replays: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//// Compare each debug run to the original
-	//debugRuns := make([]DebugRunComparison, 0)
-	//for _, child := range childReplays {
-	//	debugActions, err := s.explorer.GetMessagesByReplayID(child.ID)
-	//	if err != nil {
-	//		http.Error(w, fmt.Sprintf("Error fetching debug actions: %v", err), http.StatusInternalServerError)
-	//		return
-	//	}
-	//
-	//	comparison := compareActions(originalActions, debugActions)
-	//	debugRuns = append(debugRuns, DebugRunComparison{
-	//		ReplayID:    child.ID,
-	//		Name:        child.Name,
-	//		ActionCount: len(debugActions),
-	//		Identical:   comparison.Identical,
-	//		Differences: comparison.Differences,
-	//	})
-	//}
-	//
-	//result := ComparisonResult{
-	//	OriginalReplayID: replayID,
-	//	OriginalName:     originalReplay.Name,
-	//	ActionCount:      len(originalActions),
-	//	DebugRuns:        debugRuns,
-	//}
-	//
-	//w.Header().Set("Content-Type", "application/json")
-	//if err := json.NewEncoder(w).Encode(result); err != nil {
-	//	http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
-	//	return
-	//}
+	// Extract replay ID from URL path
+	var replayID int64
+	path := r.URL.Path
+	_, err := fmt.Sscanf(path, "/compare/%d", &replayID)
+	if err != nil {
+		http.Error(w, "Invalid replay ID. Use /compare/{id}", http.StatusBadRequest)
+		return
+	}
+
+	// Get the original replay info
+	allReplays, err := s.tunnelSystem.sideEntrance.actionLogger.GetAllReplays()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching replays: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var originalReplay *Replay
+	for _, r := range allReplays {
+		if r.ID == replayID {
+			originalReplay = &r
+			break
+		}
+	}
+
+	if originalReplay == nil {
+		http.Error(w, fmt.Sprintf("Replay %d not found", replayID), http.StatusNotFound)
+		return
+	}
+
+	// Get original actions
+	originalActions, err := s.tunnelSystem.sideEntrance.actionLogger.GetMessagesByReplayID(replayID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching original actions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get all child replays (debug runs)
+	childReplays, err := s.tunnelSystem.sideEntrance.actionLogger.GetChildReplays(replayID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching child replays: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Compare each debug run to the original
+	debugRuns := make([]DebugRunComparison, 0)
+	for _, child := range childReplays {
+		debugActions, err := s.tunnelSystem.sideEntrance.actionLogger.GetMessagesByReplayID(child.ID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error fetching debug actions: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		comparison := compareActions(originalActions, debugActions)
+		debugRuns = append(debugRuns, DebugRunComparison{
+			ReplayID:    child.ID,
+			Name:        child.Name,
+			ActionCount: len(debugActions),
+			Identical:   comparison.Identical,
+			Differences: comparison.Differences,
+		})
+	}
+
+	result := ComparisonResult{
+		OriginalReplayID: replayID,
+		OriginalName:     originalReplay.Name,
+		ActionCount:      len(originalActions),
+		DebugRuns:        debugRuns,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 type actionComparison struct {

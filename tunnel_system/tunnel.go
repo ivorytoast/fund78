@@ -50,10 +50,15 @@ type Visitor struct {
 
 func (t *Tunnel) Enter(v *Visitor) {
 	assert.IsTrue(v != nil)
-	assert.IsTrue(t.replayId != 0)
 
-	if v.ReplayId == 0 {
-		v.ReplayId = t.replayId
+	if v.IsDebug {
+		assert.IsTrue(t.replayId == 0)
+	} else {
+		assert.IsTrue(t.replayId != 0)
+		if v.ReplayId == 0 {
+			v.ReplayId = t.replayId
+		}
+
 	}
 
 	assert.IsTrue(v.ReplayId != 0)
@@ -127,7 +132,7 @@ func NewVisitorFromActionRow(messageID, topic, causedBy, messageType, direction,
 		Payload:         payload,
 		ActionType:      ActionType(messageType),
 		ActionDirection: ActionDirection(direction),
-		IsDebug:         false,
+		IsDebug:         true,
 		ReplayId:        replayID,
 	}
 }
