@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"fund78/action_logger"
 	"fund78/assert"
 	"log"
 	"math/big"
@@ -35,7 +34,7 @@ const (
 type Tunnel struct {
 	queue        chan *Visitor
 	replayId     int64
-	actionLogger *action_logger.ActionLogger
+	actionLogger *ActionLogger
 }
 
 type Visitor struct {
@@ -51,7 +50,7 @@ type Visitor struct {
 
 func (t *Tunnel) Enter(v *Visitor) {
 	assert.IsTrue(v != nil)
-	assert.IsTrue(v.ReplayId != 0)
+	assert.IsTrue(t.replayId != 0)
 
 	if v.ReplayId == 0 {
 		v.ReplayId = t.replayId
@@ -133,7 +132,7 @@ func NewVisitorFromActionRow(messageID, topic, causedBy, messageType, direction,
 	}
 }
 
-func NewNormalTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
+func NewNormalTunnel(actionLogger *ActionLogger) *Tunnel {
 	fileName := generateFileName()
 	assert.IsTrue(fileName != "")
 
@@ -150,7 +149,7 @@ func NewNormalTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 	}
 }
 
-func NewDebugTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
+func NewDebugTunnel(actionLogger *ActionLogger) *Tunnel {
 	return &Tunnel{
 		queue:        make(chan *Visitor, 100),
 		replayId:     0,
