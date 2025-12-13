@@ -1,4 +1,4 @@
-package tunnel
+package tunnel_system
 
 import (
 	"crypto/rand"
@@ -33,12 +33,12 @@ const (
 )
 
 type Tunnel struct {
-	queue        chan *visitor
+	queue        chan *Visitor
 	replayId     int64
 	actionLogger *action_logger.ActionLogger
 }
 
-type visitor struct {
+type Visitor struct {
 	MessageId       string          `json:"messageId"`
 	ActionName      ActionName      `json:"actionName"`
 	CausedBy        string          `json:"causedBy"`
@@ -49,7 +49,7 @@ type visitor struct {
 	ReplayId        int64           `json:"replayId"`
 }
 
-func (t *Tunnel) Enter(v *visitor) {
+func (t *Tunnel) Enter(v *Visitor) {
 	assert.IsTrue(v != nil)
 	assert.IsTrue(v.ReplayId != 0)
 
@@ -68,7 +68,7 @@ func (t *Tunnel) Enter(v *visitor) {
 	t.queue <- v
 }
 
-func (t *Tunnel) NextVisitor() (*visitor, error) {
+func (t *Tunnel) NextVisitor() (*Visitor, error) {
 	v := <-t.queue
 
 	switch v.ActionType {
@@ -92,7 +92,7 @@ func (t *Tunnel) NextVisitor() (*visitor, error) {
 	return v, nil
 }
 
-func (t *Tunnel) Exit(v *visitor) (*visitor, error) {
+func (t *Tunnel) Exit(v *Visitor) (*Visitor, error) {
 	// Only record if we have a valid replay ID
 	if v.ReplayId == 0 {
 		log.Printf("WARNING: Skipping RecordOut - visitor has no replay ID (message: %s)", v.MessageId)
@@ -107,8 +107,8 @@ func (t *Tunnel) Exit(v *visitor) (*visitor, error) {
 	return v, nil
 }
 
-func NewInputAction(topic ActionName, payload string) *visitor {
-	return &visitor{
+func NewInputAction(topic ActionName, payload string) *Visitor {
+	return &Visitor{
 		ActionDirection: IN,
 		ActionType:      INPUT,
 		MessageId:       generateMessageId(),
@@ -120,8 +120,8 @@ func NewInputAction(topic ActionName, payload string) *visitor {
 	}
 }
 
-func NewVisitorFromActionRow(messageID, topic, causedBy, messageType, direction, payload string, replayID int64) *visitor {
-	return &visitor{
+func NewVisitorFromActionRow(messageID, topic, causedBy, messageType, direction, payload string, replayID int64) *Visitor {
+	return &Visitor{
 		MessageId:       messageID,
 		ActionName:      ActionName(topic),
 		CausedBy:        causedBy,
@@ -144,7 +144,7 @@ func NewNormalTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 	replayId := fileId
 
 	return &Tunnel{
-		queue:        make(chan *visitor, 100),
+		queue:        make(chan *Visitor, 100),
 		replayId:     replayId,
 		actionLogger: actionLogger,
 	}
@@ -152,7 +152,7 @@ func NewNormalTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 
 func NewDebugTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 	return &Tunnel{
-		queue:        make(chan *visitor, 100),
+		queue:        make(chan *Visitor, 100),
 		replayId:     0,
 		actionLogger: actionLogger,
 	}

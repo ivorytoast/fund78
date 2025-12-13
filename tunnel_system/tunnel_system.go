@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"fund78/action_logger"
-	"fund78/tunnel"
 	"github.com/gorilla/websocket"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
@@ -18,8 +17,8 @@ type server struct {
 }
 
 type TunnelSystem struct {
-	mainEntrance *tunnel.Tunnel
-	sideEntrance *tunnel.Tunnel
+	mainEntrance *Tunnel
+	sideEntrance *Tunnel
 }
 
 // Config for TunnelSystem with optional built-in generators
@@ -60,7 +59,7 @@ func (g *IntervalGenerator) Start(ts *TunnelSystem) {
 	go func() {
 		for {
 			input := g.InputFunc()
-			v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
+			v := NewInputAction(ActionName(input.Topic), input.Payload)
 			ts.mainEntrance.Enter(v)
 			time.Sleep(g.Interval)
 		}
@@ -70,7 +69,7 @@ func (g *IntervalGenerator) Start(ts *TunnelSystem) {
 
 // ConnectionGenerator generates events from external connections
 type ConnectionGenerator struct {
-	StartFunc func(*tunnel.Tunnel)
+	StartFunc func(*Tunnel)
 }
 
 func (g *ConnectionGenerator) Start(ts *TunnelSystem) {
@@ -87,7 +86,7 @@ func NewCustomInputGenerator(inputFunc func() VisitorInput, interval time.Durati
 	}
 }
 
-func NewConnectionInputGenerator(startFunc func(*tunnel.Tunnel)) *ConnectionGenerator {
+func NewConnectionInputGenerator(startFunc func(*Tunnel)) *ConnectionGenerator {
 	return &ConnectionGenerator{
 		StartFunc: startFunc,
 	}
@@ -100,8 +99,8 @@ func NewTunnelSystem(config Config, generators []InputGenerator) {
 	}
 
 	actionLogger := action_logger.NewActionLogger()
-	mainEntrance := tunnel.NewNormalTunnel(actionLogger)
-	sideEntrance := tunnel.NewDebugTunnel(actionLogger)
+	mainEntrance := NewNormalTunnel(actionLogger)
+	sideEntrance := NewDebugTunnel(actionLogger)
 	tunnelSystem := &TunnelSystem{
 		mainEntrance: mainEntrance,
 		sideEntrance: sideEntrance,
@@ -126,7 +125,7 @@ func NewTunnelSystem(config Config, generators []InputGenerator) {
 	engineTickGenerator := NewCustomInputGenerator(
 		func() VisitorInput {
 			return VisitorInput{
-				Topic:   string(tunnel.TICK),
+				Topic:   string(TICK),
 				Payload: strconv.FormatInt(time.Now().UTC().UnixNano(), 10),
 			}
 		},
@@ -169,7 +168,7 @@ func startInputGenerators(ts *TunnelSystem, generators []InputGenerator) {
 
 // createHTTPGenerator creates a built-in HTTP server generator
 func createHTTPGenerator(port string) *ConnectionGenerator {
-	return NewConnectionInputGenerator(func(t *tunnel.Tunnel) {
+	return NewConnectionInputGenerator(func(t *Tunnel) {
 		mux := http.NewServeMux()
 
 		mux.HandleFunc("/visitor", func(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +199,7 @@ func createHTTPGenerator(port string) *ConnectionGenerator {
 				return
 			}
 
-			v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
+			v := NewInputAction(ActionName(input.Topic), input.Payload)
 			t.Enter(v)
 
 			w.Header().Set("Content-Type", "application/json")
@@ -219,7 +218,7 @@ func createHTTPGenerator(port string) *ConnectionGenerator {
 
 // createWebSocketGenerator creates a built-in WebSocket server generator
 func createWebSocketGenerator(port string) *ConnectionGenerator {
-	return NewConnectionInputGenerator(func(t *tunnel.Tunnel) {
+	return NewConnectionInputGenerator(func(t *Tunnel) {
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins
@@ -256,7 +255,7 @@ func createWebSocketGenerator(port string) *ConnectionGenerator {
 					continue
 				}
 
-				v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
+				v := NewInputAction(ActionName(input.Topic), input.Payload)
 				t.Enter(v)
 
 				log.Printf("WebSocket: Received %s with payload: %s", input.Topic, input.Payload)
