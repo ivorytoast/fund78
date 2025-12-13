@@ -62,7 +62,7 @@ func (g *IntervalGenerator) Start(ts *TunnelSystem) {
 		for {
 			input := g.InputFunc()
 			v := tunnel.NewInputAction(tunnel.ActionName(input.Topic), input.Payload)
-			ts.MainEntrance().Enter(v)
+			ts.mainEntrance.Enter(v)
 			time.Sleep(g.Interval)
 		}
 	}()
@@ -77,7 +77,7 @@ type ConnectionGenerator struct {
 func (g *ConnectionGenerator) Start(ts *TunnelSystem) {
 	go func() {
 		log.Printf("Started connection generator")
-		g.StartFunc(ts.MainEntrance())
+		g.StartFunc(ts.mainEntrance)
 	}()
 }
 
@@ -107,7 +107,7 @@ func NewConnectionInputGenerator(startFunc func(*tunnel.Tunnel)) *ConnectionGene
 	}
 }
 
-func NewTunnelSystem(config Config, generators []InputGenerator) *TunnelSystem {
+func NewTunnelSystem(config Config, generators []InputGenerator) {
 	// If empty config passed, use defaults
 	if config.HTTPPort == "" && config.WebSocketPort == "" && !config.EnableHTTP && !config.EnableWebSocket {
 		config = DefaultConfig()
@@ -153,26 +153,22 @@ func NewTunnelSystem(config Config, generators []InputGenerator) *TunnelSystem {
 	generators = append(generators, engineTickGenerator)
 
 	startInputGenerators(tunnelSystem, generators)
-	return tunnelSystem
+	tunnelSystem.openUp()
 }
 
-func (t *TunnelSystem) OpenUp() {
+func (t *TunnelSystem) openUp() {
 	for {
-		v, err := t.MainEntrance().NextVisitor()
+		v, err := t.mainEntrance.NextVisitor()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		v, err = t.MainEntrance().Exit(v)
+		v, err = t.mainEntrance.Exit(v)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 	}
-}
-
-func (t *TunnelSystem) MainEntrance() *tunnel.Tunnel {
-	return t.mainEntrance
 }
 
 func startInputGenerators(ts *TunnelSystem, generators []InputGenerator) {
@@ -318,7 +314,7 @@ func (s *server) handleGetReplay(w http.ResponseWriter, r *http.Request) {
 	//}
 	//
 	//// Get messages for this replay (already ordered from first to most recent)
-	//messages, err := s.tunnelSystem.MainEntrance().GetMessagesByReplayID(replayID)
+	//messages, err := s.tunnelSystem.mainEntrance().GetMessagesByReplayID(replayID)
 	//if err != nil {
 	//	http.Error(w, fmt.Sprintf("Error fetching messages: %v", err), http.StatusInternalServerError)
 	//	return
