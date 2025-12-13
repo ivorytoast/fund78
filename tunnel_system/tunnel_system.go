@@ -18,8 +18,8 @@ type server struct {
 }
 
 type TunnelSystem struct {
-	mainEntrance  *tunnel.Tunnel
-	sideEntrances []*tunnel.Tunnel
+	mainEntrance *tunnel.Tunnel
+	sideEntrance *tunnel.Tunnel
 }
 
 // Config for TunnelSystem with optional built-in generators
@@ -30,7 +30,6 @@ type Config struct {
 	WebSocketPort   string
 }
 
-// DefaultConfig returns a Config with sensible defaults
 func DefaultConfig() Config {
 	return Config{
 		EnableHTTP:      true,
@@ -81,25 +80,12 @@ func (g *ConnectionGenerator) Start(ts *TunnelSystem) {
 	}()
 }
 
-// Helper constructors for IntervalGenerator
-
-func NewInputGenerator(input VisitorInput, interval time.Duration) *IntervalGenerator {
-	return &IntervalGenerator{
-		InputFunc: func() VisitorInput {
-			return input
-		},
-		Interval: interval,
-	}
-}
-
 func NewCustomInputGenerator(inputFunc func() VisitorInput, interval time.Duration) *IntervalGenerator {
 	return &IntervalGenerator{
 		InputFunc: inputFunc,
 		Interval:  interval,
 	}
 }
-
-// Helper constructor for ConnectionGenerator
 
 func NewConnectionInputGenerator(startFunc func(*tunnel.Tunnel)) *ConnectionGenerator {
 	return &ConnectionGenerator{
@@ -113,39 +99,36 @@ func NewTunnelSystem(config Config, generators []InputGenerator) {
 		config = DefaultConfig()
 	}
 
-	// Apply default ports if not specified
-	if config.EnableHTTP && config.HTTPPort == "" {
-		config.HTTPPort = ":8081"
-	}
-	if config.EnableWebSocket && config.WebSocketPort == "" {
-		config.WebSocketPort = ":8082"
-	}
-
-	sideEntrances := make([]*tunnel.Tunnel, 0)
-	sideEntrances = append(sideEntrances, tunnel.NewDebugTunnel())
+	actionLogger := action_logger.NewActionLogger()
+	mainEntrance := tunnel.NewNormalTunnel(actionLogger)
+	sideEntrance := tunnel.NewDebugTunnel(actionLogger)
 	tunnelSystem := &TunnelSystem{
-		mainEntrance:  tunnel.NewNormalTunnel(),
-		sideEntrances: sideEntrances,
+		mainEntrance: mainEntrance,
+		sideEntrance: sideEntrance,
 	}
-	srv := newTunnelServer(tunnelSystem)
-	srv.start(":8080")
 
-	// Add built-in HTTP generator if enabled
 	if config.EnableHTTP {
+		if config.HTTPPort == "" {
+			config.HTTPPort = ":8081"
+		}
 		httpGen := createHTTPGenerator(config.HTTPPort)
 		generators = append([]InputGenerator{httpGen}, generators...)
 	}
 
-	// Add built-in WebSocket generator if enabled
 	if config.EnableWebSocket {
+		if config.WebSocketPort == "" {
+			config.WebSocketPort = ":8082"
+		}
 		wsGen := createWebSocketGenerator(config.WebSocketPort)
 		generators = append([]InputGenerator{wsGen}, generators...)
 	}
 
-	engineTickGenerator := NewInputGenerator(
-		VisitorInput{
-			Topic:   string(tunnel.TICK),
-			Payload: strconv.FormatInt(time.Now().UTC().UnixNano(), 10),
+	engineTickGenerator := NewCustomInputGenerator(
+		func() VisitorInput {
+			return VisitorInput{
+				Topic:   string(tunnel.TICK),
+				Payload: strconv.FormatInt(time.Now().UTC().UnixNano(), 10),
+			}
 		},
 		1*time.Second,
 	)
@@ -153,6 +136,10 @@ func NewTunnelSystem(config Config, generators []InputGenerator) {
 	generators = append(generators, engineTickGenerator)
 
 	startInputGenerators(tunnelSystem, generators)
+
+	srv := newTunnelServer(tunnelSystem)
+	srv.start(":8080")
+
 	tunnelSystem.openUp()
 }
 
@@ -162,6 +149,9 @@ func (t *TunnelSystem) openUp() {
 		if err != nil {
 			fmt.Println(err)
 			return
+		}
+		if v == nil {
+			continue
 		}
 		v, err = t.mainEntrance.Exit(v)
 		if err != nil {

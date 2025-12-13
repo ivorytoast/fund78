@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"fund78/action_logger"
 	"fund78/assert"
@@ -32,107 +33,107 @@ const (
 )
 
 type Tunnel struct {
-	queue    chan *visitor
-	replayId int64
-	explorer *action_logger.ActionLogger
+	queue        chan *visitor
+	replayId     int64
+	actionLogger *action_logger.ActionLogger
 }
 
 type visitor struct {
-	messageId   string
-	topic       ActionName
-	causedBy    string
-	payload     string
-	messageType ActionType
-	direction   ActionDirection
-	actionType  string
-	replayId    int64
+	MessageId       string          `json:"messageId"`
+	ActionName      ActionName      `json:"actionName"`
+	CausedBy        string          `json:"causedBy"`
+	Payload         string          `json:"payload"`
+	ActionType      ActionType      `json:"actionType"`
+	ActionDirection ActionDirection `json:"actionDirection"`
+	IsDebug         bool            `json:"isDebug"`
+	ReplayId        int64           `json:"replayId"`
 }
 
 func (t *Tunnel) Enter(v *visitor) {
 	assert.IsTrue(v != nil)
+	assert.IsTrue(v.ReplayId != 0)
 
-	if v.replayId == 0 {
-		v.replayId = t.replayId
+	if v.ReplayId == 0 {
+		v.ReplayId = t.replayId
 	}
 
-	assert.IsTrue(v.replayId != 0)
+	assert.IsTrue(v.ReplayId != 0)
 
-	t.explorer.InsertAction(v.replayId, v.messageId, string(v.topic), v.causedBy, string(v.messageType), string(v.direction), v.payload, v.actionType)
+	val, err := json.Marshal(v)
+	if err != nil {
+		println(err.Error())
+	}
+	println(string(val))
+	t.actionLogger.InsertAction(v.ReplayId, v.MessageId, string(v.ActionName), v.CausedBy, string(v.ActionType), string(v.ActionDirection), v.Payload, string(v.ActionType))
 	t.queue <- v
 }
 
 func (t *Tunnel) NextVisitor() (*visitor, error) {
 	v := <-t.queue
 
-	topic := GetTopic(v)
-	messageType := GetMessageType(v)
-	switch messageType {
+	switch v.ActionType {
 	case INPUT:
-		switch topic {
+		switch v.ActionName {
 		case TICK:
-			break
+			println("Not doing anything for the tick...")
+			return nil, nil
 		case LOGON:
 			break
 		default:
-			panic("unrecognized topic: " + topic)
+			panic("unrecognized actionName: " + v.ActionName)
 		}
 	case REQUEST:
 		panic("There are no request topics yet...")
 	case REPLY:
 		panic("There are no reply topics yet...")
 	default:
-		panic("unrecognized direction")
+		panic("unrecognized actionDirection")
 	}
 	return v, nil
 }
 
 func (t *Tunnel) Exit(v *visitor) (*visitor, error) {
 	// Only record if we have a valid replay ID
-	if v.replayId == 0 {
-		log.Printf("WARNING: Skipping RecordOut - visitor has no replay ID (message: %s)", v.messageId)
+	if v.ReplayId == 0 {
+		log.Printf("WARNING: Skipping RecordOut - visitor has no replay ID (message: %s)", v.MessageId)
 		return nil, fmt.Errorf("RecordOut called with nil visitor")
 	}
-	t.explorer.InsertAction(v.replayId, v.messageId, string(v.topic), v.causedBy, string(v.messageType), string(v.direction), v.payload, v.actionType)
+	val, err := json.Marshal(v)
+	if err != nil {
+		println(err.Error())
+	}
+	println(string(val))
+	t.actionLogger.InsertAction(v.ReplayId, v.MessageId, string(v.ActionName), v.CausedBy, string(v.ActionType), string(v.ActionDirection), v.Payload, string(v.ActionType))
 	return v, nil
 }
 
 func NewInputAction(topic ActionName, payload string) *visitor {
 	return &visitor{
-		direction:   IN,
-		messageType: INPUT,
-		messageId:   generateMessageId(),
-		topic:       topic,
-		causedBy:    "M0",
-		payload:     payload,
-		actionType:  "r",
-		replayId:    0, // Will be set by Tunnel when enqueued
+		ActionDirection: IN,
+		ActionType:      INPUT,
+		MessageId:       generateMessageId(),
+		ActionName:      topic,
+		CausedBy:        "M0",
+		Payload:         payload,
+		IsDebug:         false,
+		ReplayId:        0, // Will be set by Tunnel when enqueued
 	}
 }
 
 func NewVisitorFromActionRow(messageID, topic, causedBy, messageType, direction, payload string, replayID int64) *visitor {
 	return &visitor{
-		messageId:   messageID,
-		topic:       ActionName(topic),
-		causedBy:    causedBy,
-		payload:     payload,
-		messageType: ActionType(messageType),
-		direction:   ActionDirection(direction),
-		actionType:  "d",
-		replayId:    replayID,
+		MessageId:       messageID,
+		ActionName:      ActionName(topic),
+		CausedBy:        causedBy,
+		Payload:         payload,
+		ActionType:      ActionType(messageType),
+		ActionDirection: ActionDirection(direction),
+		IsDebug:         false,
+		ReplayId:        replayID,
 	}
 }
 
-func GetTopic(v *visitor) ActionName {
-	return v.topic
-}
-
-func GetMessageType(v *visitor) ActionType {
-	return v.messageType
-}
-
-func NewNormalTunnel() *Tunnel {
-	actionLogger := action_logger.NewActionLogger()
-
+func NewNormalTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 	fileName := generateFileName()
 	assert.IsTrue(fileName != "")
 
@@ -143,19 +144,17 @@ func NewNormalTunnel() *Tunnel {
 	replayId := fileId
 
 	return &Tunnel{
-		queue:    make(chan *visitor, 100),
-		replayId: replayId,
-		explorer: actionLogger,
+		queue:        make(chan *visitor, 100),
+		replayId:     replayId,
+		actionLogger: actionLogger,
 	}
 }
 
-func NewDebugTunnel() *Tunnel {
-	actionLogger := action_logger.NewActionLogger()
-
+func NewDebugTunnel(actionLogger *action_logger.ActionLogger) *Tunnel {
 	return &Tunnel{
-		queue:    make(chan *visitor, 100),
-		replayId: 0,
-		explorer: actionLogger,
+		queue:        make(chan *visitor, 100),
+		replayId:     0,
+		actionLogger: actionLogger,
 	}
 }
 
